@@ -9,12 +9,13 @@ sprint, before committing. The roadmap itself lives in [PLAN.md](PLAN.md).
 
 > **Next up: Sprint 1.1 — Foyer scene & interaction**
 >
-> Sprint 0.3 is built and verified on desktop, but **awaiting VR sign-off on the Quest 3** —
-> smooth locomotion, snap-turn, the comfort vignette and teleport cannot be judged on a
-> monitor. See the checklist in the sprint log below.
+> **Epic 0 is complete and signed off on the Quest 3.** There is a physics world, a
+> character controller that handles steps and slopes, and movement schemes for both desktop
+> and VR — smooth and teleport locomotion, smooth and snap turning, and a comfort vignette,
+> all persisted.
 >
-> Epic 0 is otherwise complete: there is a physics world, a character controller that
-> handles steps and slopes, and movement schemes for both desktop and VR.
+> Everything from here builds on a player who can already move. Sprint 1.1 is the first
+> sprint with actual *game* in it.
 
 ---
 
@@ -24,7 +25,7 @@ sprint, before committing. The roadmap itself lives in [PLAN.md](PLAN.md).
 | --- | --- | --- |
 | **0 — Foundation & VR Bootstrap** | 0.1 Project scaffold | ✅ Done |
 | | 0.2 WebXR on Quest 3 | ✅ Done |
-| | 0.3 Movement & physics | 🟡 Awaiting headset sign-off |
+| | 0.3 Movement & physics | ✅ Done |
 | **1 — Foyer & Meta Loop** | 1.1 Foyer scene & interaction | ⬜ Next |
 | | 1.2 Game state & persistence | ⬜ |
 | | 1.3 Shop & weapon dialog | ⬜ |
@@ -118,28 +119,22 @@ Decisions made during the sprint:
   `dist/` as dead chunks. They're dynamically imported and never fetched at runtime with
   `emulate: false`, so this is deploy size only, not load time.
 
-### 🟡 Sprint 0.3 — Movement & physics
+### ✅ Sprint 0.3 — Movement & physics
 
-**Verified on desktop:** typecheck clean · 111/111 unit tests · production build succeeds ·
+**Verified on desktop:** typecheck clean · 116/116 unit tests · production build succeeds ·
 smoke test passes, and it now *walks the player* rather than only checking that something
 rendered — up the greybox staircase, a standing jump, staying grounded and inside the level
 throughout.
 
-**Awaiting VR sign-off.** Locomotion comfort is the one thing that genuinely cannot be
-assessed on a monitor. In the headset, check:
+**Verified on a Quest 3 (2026-08-03):** full acceptance test passed. Head-relative smooth
+locomotion with no drift on a centred stick, smooth turning at a readable rate, the comfort
+vignette closing under artificial motion only, teleport arcs validating floor against walls
+and steep slopes, and traversal of the stairs, ramp and ledges with every wall and pillar
+holding. Nothing moved the view except the player's head and the requested turn.
 
-1. **Smooth locomotion** — the left stick moves you where you are *looking*, not where the
-   controller points. No drift when the stick is centred.
-2. **Turning** — smooth by default (Carl's call, 2026-08-02); the right stick
-   should rotate you at a steady, readable rate. Then switch `turn` to `snap` in the F2
-   panel and confirm one turn per flick, never a spin while the stick is held.
-3. **Comfort vignette** — closes as you move, opens as you stop, and never appears while
-   you are standing still or turning your head.
-4. **Teleport** — switch `locomotion` to `teleport` in the F2 panel before entering VR.
-   Green arc on floor, red on walls and steep slopes, and you arrive where the marker was.
-5. **Traversal** — walk up the stairs and the ramp without jumping. Walk into every wall,
-   the pillars and the 0.7m ledge. Nothing should let you leave the room.
-6. **Comfort rule** — nothing moves your view except your head and the turn you asked for.
+One bug found in the headset and nowhere else: turning was still snapping after the default
+changed, because the persisted value shadowed it. See the last decision below — the lesson
+generalises well past this one setting.
 
 Delivered:
 
