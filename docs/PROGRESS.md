@@ -7,16 +7,15 @@ sprint, before committing. The roadmap itself lives in [PLAN.md](PLAN.md).
 
 ## Current position
 
-> **Sprint 1.2 is built and green on desktop — awaiting the Quest 3 sign-off.**
+> **Next up: Sprint 1.3 — Shop & weapon dialog**
 >
-> The whole meta loop now runs: you start with 100 gold, open the door, a wave begins,
-> walking back into the foyer clears it and pays out, and all of it survives a reload. A
-> board by the door shows gold and what the run is doing. Next after sign-off is
-> **Sprint 1.3 — Shop & weapon dialog**, which puts a real panel on the counter and replaces
-> the dev-console purchase.
+> The whole meta loop runs and is signed off on the Quest 3: 100 gold, open the door, a wave
+> begins, walking back into the foyer clears it and pays out, and all of it survives a
+> reload. A board by the door shows gold and what the run is doing.
 >
-> The wave itself is still a walk into an empty passage — there is no dungeon until 2.1 and
-> nothing to kill until 2.3.
+> 1.3 puts a real panel on the shop counter and retires the dev-console purchase. The wave
+> itself is still a walk into an empty passage — there is no dungeon until 2.1 and nothing to
+> kill until 2.3.
 
 ---
 
@@ -28,8 +27,8 @@ sprint, before committing. The roadmap itself lives in [PLAN.md](PLAN.md).
 | | 0.2 WebXR on Quest 3 | ✅ Done |
 | | 0.3 Movement & physics | ✅ Done |
 | **1 — Foyer & Meta Loop** | 1.1 Foyer scene & interaction | ✅ Done |
-| | 1.2 Game state & persistence | 🟨 Awaiting headset sign-off |
-| | 1.3 Shop & weapon dialog | ⬜ Next |
+| | 1.2 Game state & persistence | ✅ Done |
+| | 1.3 Shop & weapon dialog | 🟨 In progress |
 | **2 — Wave Combat Core** | 2.1 Procedural dungeon generation | ⬜ |
 | | 2.2 Weapon & attack framework | ⬜ |
 | | 2.3 Enemies, AI & wave loop | ⬜ |
@@ -271,22 +270,15 @@ Decisions made during the sprint:
 - Retired: `XRDiagnostics` now only mounts in the greybox, where it is still the fastest way
   to tell a dead thumbstick from broken locomotion.
 
-### 🟨 Sprint 1.2 — Game state & persistence
+### ✅ Sprint 1.2 — Game state & persistence
 
 **Verified on desktop:** typecheck clean · 212/212 unit tests · production build succeeds ·
 smoke test plays the whole loop — a fresh save with 100 gold, out through the door into the
 wave, back in to clear it, the payout landing, a weapon bought, then a real page reload with
 the gold, the weapon and the wave number all still there.
 
-**Awaiting a Quest 3 pass.** What to check, in the headset:
-
-1. The board by the door reads **Gold 100** and **Wave 1 awaits** from the spawn point.
-2. Open the door. The board should say the dungeon is stirring, then that you are in wave 1.
-3. Walk out through the doorway and back in. The wave clears, the board shows the payout,
-   and after a couple of seconds it hands you back to the foyer on **wave 2** with more gold.
-4. Reload the page in the headset browser. The gold and the wave number must both still be
-   there — that is the whole sprint.
-5. Do it twice more and watch the numbers keep rising rather than resetting.
+**Verified on a Quest 3 (2026-08-03):** the full loop — board, door, wave, clear, payout,
+back to the foyer on the next wave — and the save survived a reload in the headset browser.
 
 Delivered:
 
