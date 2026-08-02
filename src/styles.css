@@ -35,6 +35,59 @@ canvas {
   outline: none;
 }
 
+.vr-entry {
+  position: fixed;
+  top: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  text-align: center;
+}
+
+.vr-button {
+  font: inherit;
+  font-size: 15px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--parchment);
+  background: rgba(20, 14, 10, 0.72);
+  border: 1px solid var(--ember);
+  border-radius: 3px;
+  padding: 12px 28px;
+  cursor: pointer;
+  transition: background 120ms ease, box-shadow 120ms ease;
+}
+
+.vr-button:hover:not(:disabled) {
+  background: rgba(255, 138, 61, 0.18);
+  box-shadow: 0 0 18px rgba(255, 138, 61, 0.25);
+}
+
+.vr-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.vr-entry--unavailable {
+  font-size: 12px;
+  line-height: 1.6;
+  max-width: 34ch;
+  color: rgba(217, 207, 187, 0.5);
+}
+
+.vr-entry code {
+  color: var(--ember);
+}
+
+.vr-error {
+  font-size: 12px;
+  color: #e0705a;
+  max-width: 40ch;
+}
+
 .hint {
   position: fixed;
   bottom: 14px;

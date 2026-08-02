@@ -69,6 +69,41 @@ adb reverse tcp:5173 tcp:5173
 and open `http://localhost:5173` in the Quest browser. `localhost` is a secure context, so
 WebXR works without a certificate.
 
+**If there is no "Enter VR" button on the headset,** the page is almost certainly not on a
+secure origin — `navigator.xr` simply does not exist over plain http on a LAN address. The
+page says so explicitly rather than showing nothing; use `dev:xr` or `adb reverse`.
+
+### What to check in the headset
+
+Enter VR and confirm, in order:
+
+1. **Stereo** — the room has depth, and the 1.7m scale-reference column reads as roughly
+   your own height. If it looks like a doll's house or a cathedral, the metre scale is wrong.
+2. **Tracking** — both controller models are visible and follow your hands, each with a ray.
+3. **Input** — the diagnostics panel in front of the spawn point has one column per hand.
+   Squeeze the trigger and grip (bars fill proportionally), press A/B and X/Y (lamps light),
+   and push the thumbstick (the dot follows it). The bar at the top of each column is lit
+   while that controller is tracked.
+4. **Haptics** — each trigger pull buzzes *that* controller, not both.
+5. **Comfort** — nothing moves your view except your own head. Report anything that doesn't
+   hold; this is a hard rule, not a preference.
+
+### Desktop VR emulator
+
+Append `?xremulate` to the dev URL to run the iwer Quest 3 emulator in a desktop browser.
+It is useful for poking at input plumbing without putting the headset on, and is opt-in on
+purpose — it injects a fake `navigator.xr`, which would otherwise have the smoke test
+exercising a path no real player takes. It is **not** a substitute for on-device testing:
+it tells you nothing about performance, stereo comfort, or tracking.
+
+### Render settings
+
+`foveation` and `framebufferScale` persist in `localStorage` and are the two knobs that
+decide whether the Quest holds 72fps. Set them from the F2 tuning panel on the desktop
+before entering VR — leva is DOM, so it is invisible once the headset takes over.
+Foveation applies live; framebuffer scale sizes the swapchain and so only takes effect on
+the next VR entry.
+
 ## Architecture notes
 
 - **`src/core/loop.ts`** — fixed 60Hz simulation, decoupled from render rate. Gameplay
@@ -79,17 +114,24 @@ WebXR works without a certificate.
 - **VR comfort is a hard rule.** Nothing moves the VR camera except the player's head — no
   screenshake, no forced rotation.
 - **In-game UI is world-space and diegetic**, so desktop and VR share one implementation.
-  DOM is reserved for the pre-session menu.
+  DOM is reserved for the pre-session menu and the Enter VR button, which has to be a real
+  HTML element because entering a session requires a user gesture.
+- **`src/systems/xrInput.ts`** — controller state is sampled once per fixed step into a
+  plain mutable snapshot, not a hook. Gameplay reads `xrInput.right.trigger.justPressed`.
+  Edge flags are true for exactly one step, which is what makes "fire on trigger press"
+  behave identically at 72, 90 and 120fps.
+- **`src/systems/haptics.ts`** — haptics carry the weight screenshake carries on a flat
+  screen, without moving the camera. Every impact and cast routes through here.
 
 ## Layout
 
 ```
 src/
-  core/      simulation loop, debug hooks
-  systems/   cross-cutting gameplay systems
-  entities/  player, enemies, projectiles
+  core/      simulation loop, XR store, debug hooks
+  systems/   input, haptics, settings, cross-cutting gameplay systems
+  entities/  player rig, enemies, projectiles
   scenes/    foyer, dungeon, greybox
-  ui/        diegetic panels and dev overlays
+  ui/        diegetic panels, VR entry, dev overlays
   data/      weapon / enemy / wave definitions
 scripts/     smoke test
 ```

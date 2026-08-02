@@ -1,9 +1,21 @@
 import { Canvas } from '@react-three/fiber'
 import { Suspense } from 'react'
 import { ACESFilmicToneMapping } from 'three'
+import { XR, useXR } from '@react-three/xr'
 import { SimulationDriver } from '@/core/simulation'
+import { xrStore } from '@/core/xr'
 import { GreyboxRoom } from '@/scenes/GreyboxRoom'
-import { DevPanel, DevPerf, useDevToggles, useLightingControls } from '@/ui/DevOverlay'
+import { XRDiagnostics } from '@/scenes/XRDiagnostics'
+import { PlayerRig } from '@/entities/PlayerRig'
+import { XRInputSampler, XRRenderSettings } from '@/systems/XRInputSampler'
+import {
+  DevPanel,
+  DevPerf,
+  XRSettingsControls,
+  useDevToggles,
+  useLightingControls,
+} from '@/ui/DevOverlay'
+import { VRButton } from '@/ui/VRButton'
 import { OrbitControls } from '@react-three/drei'
 
 function SceneLighting() {
@@ -26,6 +38,19 @@ function SceneLighting() {
   )
 }
 
+/**
+ * Placeholder camera control until the character controller lands in Sprint 0.3.
+ *
+ * Unmounted inside a session: in XR the camera belongs to the headset, and orbit controls
+ * would be writing to it every frame behind the runtime's back. That is exactly the class
+ * of bug the comfort rule exists to prevent.
+ */
+function DesktopCameraControls() {
+  const inSession = useXR((state) => state.session != null)
+  if (inSession) return null
+  return <OrbitControls target={[0, 1.2, 0]} maxPolarAngle={Math.PI * 0.49} />
+}
+
 export function App() {
   const { showPerf, showPanel } = useDevToggles()
 
@@ -42,26 +67,33 @@ export function App() {
         }}
         camera={{ position: [0, 1.7, 8], fov: 70, near: 0.05, far: 100 }}
       >
-        <SimulationDriver />
-        <color attach="background" args={['#0b0b10']} />
-        {/* Loose while greyboxing so the whole room reads. The dungeon pulls this in hard
-            (Sprint 3.1) — tight fog is most of what makes the torch-lit rooms frightening. */}
-        <fog attach="fog" args={['#0b0b10', 20, 70]} />
+        <XR store={xrStore}>
+          <SimulationDriver />
+          <XRInputSampler />
+          <XRRenderSettings />
 
-        <Suspense fallback={null}>
-          <SceneLighting />
-          <GreyboxRoom />
-        </Suspense>
+          <color attach="background" args={['#0b0b10']} />
+          {/* Loose while greyboxing so the whole room reads. The dungeon pulls this in hard
+              (Sprint 3.1) — tight fog is most of what makes the torch-lit rooms frightening. */}
+          <fog attach="fog" args={['#0b0b10', 20, 70]} />
 
-        {/* Placeholder camera control until the character controller lands in Sprint 0.3. */}
-        <OrbitControls target={[0, 1.2, 0]} maxPolarAngle={Math.PI * 0.49} />
+          <Suspense fallback={null}>
+            <SceneLighting />
+            <GreyboxRoom />
+            <XRDiagnostics />
+            <PlayerRig />
+          </Suspense>
 
-        <DevPerf visible={showPerf} />
+          <DesktopCameraControls />
+          <DevPerf visible={showPerf} />
+        </XR>
       </Canvas>
 
+      <VRButton />
       <DevPanel visible={showPanel} />
+      {import.meta.env.DEV && <XRSettingsControls />}
       <div className="hint">
-        Sprint 0.1 — greybox room · drag to orbit
+        Sprint 0.2 — WebXR bring-up · drag to orbit
         {import.meta.env.DEV && <> · F1 perf · F2 tuning</>}
       </div>
     </>

@@ -7,10 +7,12 @@ sprint, before committing. The roadmap itself lives in [PLAN.md](PLAN.md).
 
 ## Current position
 
-> **Next up: Sprint 0.2 — WebXR on Quest 3**
+> **Sprint 0.2 is built and awaiting on-headset sign-off. Next up: Sprint 0.3 — Movement & physics.**
 >
-> Blocked on nothing. First sprint that needs on-headset testing by Carl —
-> stereo rendering, controller tracking, and haptics can't be verified from a desktop.
+> Everything verifiable from a desktop passes. The parts that only a Quest 3 can confirm —
+> stereo rendering, controller tracking, haptics, true scale — are listed under
+> "What to check in the headset" in the README. Sprint 0.3 can start before that sign-off;
+> if the headset turns up a problem it will be a fix to 0.2's code, not a rewrite of 0.3's.
 
 ---
 
@@ -19,8 +21,8 @@ sprint, before committing. The roadmap itself lives in [PLAN.md](PLAN.md).
 | Epic | Sprint | Status |
 | --- | --- | --- |
 | **0 — Foundation & VR Bootstrap** | 0.1 Project scaffold | ✅ Done |
-| | 0.2 WebXR on Quest 3 | ⬜ Next |
-| | 0.3 Movement & physics | ⬜ |
+| | 0.2 WebXR on Quest 3 | 🟡 Built — awaiting headset sign-off |
+| | 0.3 Movement & physics | ⬜ Next |
 | **1 — Foyer & Meta Loop** | 1.1 Foyer scene & interaction | ⬜ |
 | | 1.2 Game state & persistence | ⬜ |
 | | 1.3 Shop & weapon dialog | ⬜ |
@@ -67,6 +69,50 @@ Decisions made during the sprint:
   pinning an exact build, so `npm update` doesn't trigger a 150MB download.
 - The smoke test's fps figure is **not** a performance signal — it runs on SwiftShader.
   Real performance is measured on-device with the F1 HUD.
+
+### 🟡 Sprint 0.2 — WebXR on Quest 3
+
+**Verified on desktop:** typecheck clean · 32/32 unit tests · production build succeeds ·
+headless smoke test renders (55% lit pixels, no console errors, simulated time tracking
+wall-clock, VR entry UI correctly resolving to "unavailable" with no XR device present).
+
+**Not yet verified — needs the headset.** Stereo rendering, controller tracking, haptics
+and true 1:1 scale cannot be checked from a desktop at all. The step-by-step check is in
+the README under "What to check in the headset".
+
+Delivered:
+
+- `src/core/xr.ts` — the XR store. Requests `immersive-vr` explicitly (the library default
+  prefers `immersive-ar`, and the Quest 3 supports passthrough — which would have dropped
+  the player into a see-through version of a game whose whole premise is darkness).
+  Optional session features we don't use are switched off; `layers` stays on.
+- `src/systems/xrInput.ts` — controller state sampled once per fixed step into a plain
+  mutable snapshot with one-step edge flags. The interface every later sprint's combat code
+  reads from.
+- `src/systems/haptics.ts` — named intensity presets, no-ops when no actuator is present so
+  desktop and VR share one call path.
+- `src/systems/settings.ts` — persisted settings with clamping and a version/migration path,
+  seeded with the two XR render knobs. Kept separate from the game save on purpose.
+- `src/ui/VRButton.tsx` — VR entry, with an explicit message for the insecure-context case.
+- `src/entities/PlayerRig.tsx` — `XROrigin` at the spawn point (feet, not eyes).
+- `src/scenes/XRDiagnostics.tsx` — world-space controller readout. Scaffolding; removed in
+  Sprint 1.1 when the foyer lands.
+
+Decisions made during the sprint:
+
+- **Orbit controls unmount inside a session.** In XR the camera belongs to the headset;
+  leaving them mounted would have them writing to it every frame behind the runtime's back.
+- **Foveation is live, framebuffer scale is not.** The latter sizes the swapchain, which
+  WebXR allocates once per session, so it only lands on the next VR entry. The tuning panel
+  label says so rather than appearing to do nothing.
+- **Indicators carry colour in `emissive`, not albedo.** A green lamp still looks green when
+  it's off under ambient light, which made a disconnected controller indistinguishable from
+  a tracked one. This is the rule the whole torch-lit dungeon will need.
+- **The device emulator is opt-in** via `?xremulate`, not on by default — it injects a fake
+  `navigator.xr` that would have the smoke test exercising a path no real player takes.
+- Known, deferred to Sprint 4.4: the emulator's synthetic environments (~4.6MB) land in
+  `dist/` as dead chunks. They're dynamically imported and never fetched at runtime with
+  `emulate: false`, so this is deploy size only, not load time.
 
 ---
 

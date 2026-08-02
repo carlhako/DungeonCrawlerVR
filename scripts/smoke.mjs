@@ -114,9 +114,24 @@ const info = await page.evaluate(async (sampleMs) => {
     requestAnimationFrame(tick)
   })
 
+  // Headless Chromium has no `navigator.xr`, so the entry UI must resolve to its
+  // "unavailable" state. That is a real assertion: it proves the support probe settled and
+  // the button mounted, rather than hanging forever on an unresolved promise — which is
+  // what a player on plain http would otherwise see as a blank corner of the screen.
+  const vrEntry = document.querySelector('.vr-entry')
+
   return {
     canvas: { width: canvas.width, height: canvas.height },
     webgl2: !!gl,
+    xr: {
+      navigatorXr: navigator.xr != null,
+      entryRendered: vrEntry != null,
+      entryState: vrEntry?.classList.contains('vr-entry--unavailable')
+        ? 'unavailable'
+        : vrEntry
+          ? 'offered'
+          : 'missing',
+    },
     renderer: dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : 'unknown',
     drawingBufferOk: gl ? gl.drawingBufferWidth > 300 : false,
     fps: +(sample.count / (sample.elapsed / 1000)).toFixed(1),
@@ -148,6 +163,15 @@ else if (Math.abs(info.simAdvanced - info.sampleSeconds) > 0.25) {
   failures.push(
     `simulation drifted from wall-clock: ${info.simAdvanced}s simulated in ${info.sampleSeconds}s`,
   )
+}
+if (!info.xr.entryRendered) failures.push('VR entry UI never rendered')
+// Headless Chromium exposes `navigator.xr` but has no device behind it, so
+// `isSessionSupported('immersive-vr')` resolves false. The entry must therefore settle on
+// "unavailable". Anything else means the support probe either hung or claimed a session
+// could start where none can — the bug that shows up on the headset as a button that does
+// nothing.
+if (info.xr.entryState !== 'unavailable') {
+  failures.push(`VR entry should be unavailable headless, got: ${info.xr.entryState}`)
 }
 if (consoleErrors.length) failures.push(`console errors: ${consoleErrors.join(' | ')}`)
 

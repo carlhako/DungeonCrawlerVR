@@ -1,6 +1,7 @@
 import { Perf } from 'r3f-perf'
 import { Leva, useControls } from 'leva'
 import { useEffect, useState } from 'react'
+import { SETTING_LIMITS, useSettings } from '@/systems/settings'
 
 /**
  * Development instrumentation: the frame HUD and the live tuning panel.
@@ -43,6 +44,43 @@ export function DevPerf({ visible }: { visible: boolean }) {
 export function DevPanel({ visible }: { visible: boolean }) {
   if (!import.meta.env.DEV) return null
   return <Leva collapsed={false} hidden={!visible} titleBar={{ title: 'Tuning' }} />
+}
+
+/**
+ * XR render knobs, wired straight to the persisted settings store.
+ *
+ * Set these on the desktop before entering VR — leva is DOM, so it is invisible once the
+ * headset takes over. They persist, so the value you pick here is the value the Quest
+ * session starts with. The real settings screen arrives in Sprint 4.4.
+ */
+export function XRSettingsControls() {
+  const set = useSettings((state) => state.set)
+  const foveation = useSettings((state) => state.foveation)
+  const framebufferScale = useSettings((state) => state.framebufferScale)
+
+  useControls(
+    'XR render',
+    () => ({
+      foveation: {
+        value: foveation,
+        ...SETTING_LIMITS.foveation,
+        onChange: (value: number) => set('foveation', value),
+      },
+      // Renamed in the panel to say out loud that it won't take effect until you re-enter
+      // VR — the swapchain is sized once per session.
+      'framebufferScale (on re-entry)': {
+        value: framebufferScale,
+        ...SETTING_LIMITS.framebufferScale,
+        onChange: (value: number) => set('framebufferScale', value),
+      },
+    }),
+    { collapsed: true },
+    // Deliberately not re-created when the values change: leva owns the widget state once
+    // mounted, and rebuilding it on every drag would fight the slider.
+    [set],
+  )
+
+  return null
 }
 
 /** Scene-lighting knobs, so the greybox can be dialled in without a rebuild. */
