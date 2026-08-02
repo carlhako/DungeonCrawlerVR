@@ -7,12 +7,11 @@ sprint, before committing. The roadmap itself lives in [PLAN.md](PLAN.md).
 
 ## Current position
 
-> **Sprint 0.2 is built and awaiting on-headset sign-off. Next up: Sprint 0.3 — Movement & physics.**
+> **Next up: Sprint 0.3 — Movement & physics**
 >
-> Everything verifiable from a desktop passes. The parts that only a Quest 3 can confirm —
-> stereo rendering, controller tracking, haptics, true scale — are listed under
-> "What to check in the headset" in the README. Sprint 0.3 can start before that sign-off;
-> if the headset turns up a problem it will be a fix to 0.2's code, not a rewrite of 0.3's.
+> Epic 0 is two-thirds done. Sprint 0.2 passed its full acceptance test on a real Quest 3
+> on 2026-08-02, so the VR foundation — session, stereo, tracking, input, haptics, scale —
+> is confirmed working rather than merely built.
 
 ---
 
@@ -21,7 +20,7 @@ sprint, before committing. The roadmap itself lives in [PLAN.md](PLAN.md).
 | Epic | Sprint | Status |
 | --- | --- | --- |
 | **0 — Foundation & VR Bootstrap** | 0.1 Project scaffold | ✅ Done |
-| | 0.2 WebXR on Quest 3 | 🟡 Built — awaiting headset sign-off |
+| | 0.2 WebXR on Quest 3 | ✅ Done |
 | | 0.3 Movement & physics | ⬜ Next |
 | **1 — Foyer & Meta Loop** | 1.1 Foyer scene & interaction | ⬜ |
 | | 1.2 Game state & persistence | ⬜ |
@@ -70,15 +69,17 @@ Decisions made during the sprint:
 - The smoke test's fps figure is **not** a performance signal — it runs on SwiftShader.
   Real performance is measured on-device with the F1 HUD.
 
-### 🟡 Sprint 0.2 — WebXR on Quest 3
+### ✅ Sprint 0.2 — WebXR on Quest 3
 
 **Verified on desktop:** typecheck clean · 32/32 unit tests · production build succeeds ·
 headless smoke test renders (55% lit pixels, no console errors, simulated time tracking
 wall-clock, VR entry UI correctly resolving to "unavailable" with no XR device present).
 
-**Not yet verified — needs the headset.** Stereo rendering, controller tracking, haptics
-and true 1:1 scale cannot be checked from a desktop at all. The step-by-step check is in
-the README under "What to check in the headset".
+**Verified on a Quest 3 (2026-08-02):** entered VR over LAN HTTPS; stereo rendering, 1:1
+metre scale against the 1.7m reference column, both controllers tracked with rays, all
+inputs mapped correctly on the diagnostics panel (analog triggers and grips, face buttons,
+thumbsticks), per-controller haptics firing on the correct hand, and no camera motion other
+than the player's head. Full acceptance test passed.
 
 Delivered:
 
