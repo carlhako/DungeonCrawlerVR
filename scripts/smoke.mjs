@@ -178,13 +178,65 @@ async function walkUntil(keys, done, maxSeconds = 15) {
   for (const key of keys) await page.keyboard.down(key)
   let player = await readPlayer()
   const deadline = Date.now() + maxSeconds * 1000
-  while (Date.now() < deadline && !done(player)) {
+  // `done` may be async — some conditions are about the interaction focus, not the position.
+  while (Date.now() < deadline && !(await done(player))) {
     await page.waitForTimeout(100)
     player = await readPlayer()
   }
   for (const key of keys) await page.keyboard.up(key)
   return player
 }
+
+/**
+ * The foyer: walk to the door, be offered it, open it, start a wave.
+ *
+ * This is Sprint 1.1's acceptance test, minus the headset. What it can prove headlessly is
+ * the part that is easy to get wrong and impossible to see in a screenshot: that the *right*
+ * object is focused, that `Space` opened the door instead of jumping, and that the door
+ * actually called into the run.
+ */
+function readFocus() {
+  return page.evaluate(() => window.__DCVR__?.focus ?? null)
+}
+
+const foyer = {}
+foyer.spawn = await readPlayer()
+// From the spawn point, looking at the door — the view a player actually opens the game on.
+await page.screenshot({ path: `${OUT}/smoke-foyer.png` })
+
+// Forward, until the door offers itself. The handle is at about a metre and the eye is at
+// 1.6m looking dead level, so this is the proximity path rather than the look-ray.
+foyer.approach = await walkUntil(
+  ['KeyW'],
+  async () => (await readFocus())?.id === 'foyer-door',
+)
+foyer.focus = await readFocus()
+foyer.wavesBefore = await page.evaluate(() => window.__DCVR__?.wavesStarted ?? null)
+
+await page.keyboard.press('Space')
+await page.waitForTimeout(300)
+
+foyer.wavesAfter = await page.evaluate(() => window.__DCVR__?.wavesStarted ?? null)
+foyer.afterActivate = await readPlayer()
+foyer.focusAfter = await readFocus()
+
+// The opening leaf shoves anyone standing in its path — it is a kinematic body with a
+// collider, and it is supposed to. Step back into the middle of the doorway first.
+foyer.recentred = await walkUntil(['KeyD'], (p) => p.x > -0.15, 8)
+
+// Walk through the doorway. This is what proves the door's *collider* swung with it and not
+// just its mesh — a door that opens visually and still blocks you is a bug you cannot see.
+foyer.throughDoor = await walkUntil(['KeyW'], (p) => p.z < -6.4, 8)
+
+/**
+ * Now the greybox, for the movement course. It is the only room with a staircase, a ramp
+ * and a ledge in it, and the character controller's behaviour is invisible without them.
+ */
+await page.goto(`${URL}${URL.includes('?') ? '&' : '?'}scene=greybox`, {
+  waitUntil: 'networkidle',
+})
+await page.waitForFunction(() => window.__DCVR__?.player != null, { timeout: 15000 })
+await page.waitForTimeout(500)
 
 const movement = {}
 movement.spawn = await readPlayer()
@@ -199,16 +251,29 @@ movement.upStairs = await walkUntil(['KeyW'], (p) => p.y > 1)
 
 // A jump from standing. Tapped, not held — the press has to survive being shorter than a
 // single fixed step, which is exactly the input the naive polling implementation dropped.
+//
+// Sampled to the peak rather than at a fixed delay: the whole hop lasts under half a second
+// and a single readback under SwiftShader can take longer than that, so a timed sample
+// lands somewhere random on the arc and fails a jump that worked perfectly.
 await page.keyboard.press('Space')
-await page.waitForTimeout(150)
-movement.midJump = await readPlayer()
-await page.waitForTimeout(1500)
+movement.midJump = { ...movement.upStairs }
+let sawAirborne = false
+for (let i = 0; i < 12; i++) {
+  const sample = await readPlayer()
+  if (!sample.grounded) sawAirborne = true
+  if (sample.y > movement.midJump.y) movement.midJump = sample
+  if (sawAirborne && sample.grounded) break
+  await page.waitForTimeout(40)
+}
+movement.leftTheGround = sawAirborne
+await page.waitForTimeout(1200)
 movement.landed = await readPlayer()
 
 mkdirSync(OUT, { recursive: true })
 await page.screenshot({ path: `${OUT}/smoke.png` })
 await browser.close()
 
+info.foyer = foyer
 info.movement = movement
 
 const results = { ...info, consoleErrors }
@@ -238,6 +303,37 @@ if (!info.xr.entryRendered) failures.push('VR entry UI never rendered')
 if (info.xr.entryState !== 'unavailable') {
   failures.push(`VR entry should be unavailable headless, got: ${info.xr.entryState}`)
 }
+const foy = info.foyer
+if (!foy.focus) {
+  failures.push('walking to the door never offered it — no interaction focus')
+} else {
+  if (foy.focus.id !== 'foyer-door') {
+    failures.push(`wrong thing focused at the door: ${foy.focus.id}`)
+  }
+  // The acceptance test for the sprint. A door that animates but never calls into the run
+  // is exactly the kind of thing that looks perfect and does nothing.
+  if (foy.wavesAfter !== foy.wavesBefore + 1) {
+    failures.push(
+      `activating the door did not start a wave: ${foy.wavesBefore} -> ${foy.wavesAfter}`,
+    )
+  }
+  // Space is contextual: with a prompt showing it opens the door and must *not* also jump.
+  if (Math.abs(foy.afterActivate.y - foy.approach.y) > 0.05) {
+    failures.push(`Space jumped as well as activating: y=${foy.afterActivate.y}`)
+  }
+  // The door swings away as it opens, so the handle may well be out of reach by now. If it
+  // is still focused, it must be offering the other half of the toggle.
+  if (foy.focusAfter && foy.focusAfter.label !== 'Close the door') {
+    failures.push(`door label did not flip after opening: ${foy.focusAfter.label}`)
+  }
+  if (foy.throughDoor.z >= -6.4) {
+    failures.push(`could not walk through the opened door: z=${foy.throughDoor.z}`)
+  }
+  if (!foy.throughDoor.grounded || Math.abs(foy.throughDoor.y) > 0.15) {
+    failures.push(`fell through the floor past the door: y=${foy.throughDoor.y}`)
+  }
+}
+
 const move = info.movement
 if (!move.spawn) failures.push('player state missing — is the rig mounted?')
 else {
@@ -269,7 +365,7 @@ else {
   if (move.midJump.y <= move.upStairs.y + 0.1) {
     failures.push(`jump did not lift the player: y=${move.midJump.y}`)
   }
-  if (move.midJump.grounded) failures.push('player still grounded mid-jump')
+  if (!move.leftTheGround) failures.push('player never left the ground during the jump')
   if (!move.landed.grounded) failures.push('player never landed after jumping')
   // Walls sit at ±8 and the floor at 0. Outside that box, the player has left the level —
   // the failure a screenshot of a perfectly good-looking room will never show you.

@@ -205,6 +205,42 @@ export function vignetteTarget(
 }
 
 /**
+ * Rotate a horizontal vector about the Y axis.
+ *
+ * Matches three's `Rotation.makeRotationY`, so a positive angle takes a world-space vector
+ * into a frame yawed by that angle and a negative one brings it back. Used to convert the
+ * room-scale recentring offset between world space and the player rig's rotated space —
+ * getting that sign backwards drifts the play space sideways every time you turn, which is
+ * an unpleasant thing to debug in a headset.
+ */
+export function rotateY(x: number, z: number, angle: number): Vec2 {
+  const sin = Math.sin(angle)
+  const cos = Math.cos(angle)
+  return { x: x * cos + z * sin, y: -x * sin + z * cos }
+}
+
+/**
+ * How much of the comfort vignette a blocked head deserves.
+ *
+ * When the player physically walks their head into a wall, the capsule stops and the head
+ * does not — there is no way to prevent that without moving the camera, which the comfort
+ * rule forbids outright. The honest response is to black out the view rather than let
+ * someone see through the level, which is standard practice and reads as "you can't go that
+ * way" rather than as a glitch.
+ *
+ * Ramped rather than binary so that brushing a wall dims slightly instead of slamming to
+ * black — the capsule sits 2cm off every surface it touches by design.
+ */
+export const HEAD_BLOCK_START = 0.06
+export const HEAD_BLOCK_FULL = 0.25
+
+export function headBlockAmount(overshoot: number): number {
+  if (overshoot <= HEAD_BLOCK_START) return 0
+  if (overshoot >= HEAD_BLOCK_FULL) return 1
+  return (overshoot - HEAD_BLOCK_START) / (HEAD_BLOCK_FULL - HEAD_BLOCK_START)
+}
+
+/**
  * Frame-rate-independent exponential smoothing towards a target.
  *
  * `halfLife` is the time in seconds to close half the remaining distance, which stays

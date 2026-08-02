@@ -27,6 +27,15 @@ export interface PlayerState {
   turning: boolean
   /** True while the teleport arc is being aimed. */
   aiming: boolean
+  /**
+   * 0..1: how far the player's head has physically walked past where the capsule can go.
+   *
+   * Room-scale walking is the one case where the head and the body can disagree — the
+   * capsule stops at a wall and nothing on earth stops someone taking another step. Since
+   * moving the view is forbidden, the response is to black it out instead. See
+   * `headBlockAmount`.
+   */
+  headBlocked: number
 }
 
 export const playerState: PlayerState = {
@@ -36,6 +45,7 @@ export const playerState: PlayerState = {
   grounded: false,
   turning: false,
   aiming: false,
+  headBlocked: 0,
 }
 
 /**
@@ -47,7 +57,14 @@ export const playerState: PlayerState = {
  */
 export const playerCollider: { current: Collider | null } = { current: null }
 
-/** Where the player starts. Replaced by the foyer's spawn marker in Sprint 1.1. */
+/**
+ * Where the player starts, in both rooms.
+ *
+ * Shared deliberately: the foyer is laid out around this point (facing the door, with the
+ * shop counter behind your shoulder) so that swapping scenes with `?scene=greybox` doesn't
+ * also change where you begin. A per-scene spawn arrives with the dungeon in Sprint 2.1,
+ * when there is more than one place worth starting.
+ */
 export const PLAYER_SPAWN: [number, number, number] = [0, 0, 4]
 
 /**

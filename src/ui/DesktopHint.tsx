@@ -22,7 +22,8 @@ export function DesktopHint() {
   if (locked) {
     return (
       <div className="hint hint--locked">
-        WASD move · Shift sprint · Space jump · Esc release cursor
+        WASD move · Shift sprint · Space jump (use, when a prompt is showing) · Esc release
+        cursor
       </div>
     )
   }

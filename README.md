@@ -50,7 +50,7 @@ inert until you do. `Esc` releases it.
 | `W` `A` `S` `D` / arrows | Move |
 | Mouse | Look |
 | `Shift` | Sprint |
-| `Space` | Jump |
+| `Space` | Use, when a prompt is showing — otherwise jump |
 
 ### VR controls
 
@@ -58,7 +58,9 @@ inert until you do. `Esc` releases it.
 | --- | --- |
 | Left thumbstick | Move (smooth mode) / aim the teleport arc (teleport mode) |
 | Right thumbstick | Turn — smooth by default, snap optional |
-| Right controller | Points the teleport arc |
+| Right controller | Points the teleport arc, and the interaction ray |
+| Trigger | Use whatever the ray is on, or whatever your hand is holding |
+| Grip | Use whatever your hand is on (near-grab only) |
 | `A` | Jump (smooth mode only) |
 
 Locomotion mode, turn style, speed and vignette strength all live in the F2 panel under
@@ -68,6 +70,12 @@ Locomotion mode, turn style, speed and vignette strength all live in the F2 pane
 
 - `F1` — frame/perf HUD
 - `F2` — live tuning panel (Movement, XR render, Lighting, Physics)
+
+### Scenes
+
+The game opens in the **foyer**. The Sprint 0.1–0.3 greybox is still there at
+`?scene=greybox` — it is the only room with a staircase, a ramp and a ledge to walk at, so
+it stays as the character controller's test rig and the smoke test still drives it.
 
 ## Testing on the Quest 3
 
@@ -119,6 +127,13 @@ Enter VR and confirm, in order:
 7. **Teleport** — switch `locomotion` to `teleport` in the F2 panel *before* entering VR.
    Hold the left stick forward to aim from the right controller; the arc turns green on
    valid floor and red on walls, ceilings and steep slopes. Release to move.
+8. **Interaction** — point at the door handle from across the foyer and pull the trigger,
+   then walk up and grab it with your hand instead. Both should open it, and the prompt
+   should name the button you would actually use. Ring the shop bell too — pointing at one
+   thing while stood next to another must never address the wrong one.
+9. **Room-scale** — physically walk a few steps without touching the stick. Your body should
+   come with you: walk into a wall and the view fades out rather than letting you see
+   through it, and it should come back as you step away.
 
 ### Comfort
 
@@ -133,9 +148,10 @@ before entering VR; they persist.
 - **`comfortVignette`** — how far the field of view narrows while you are being moved by
   something other than your own legs. 0 disables it.
 
-Known gap: the player capsule does not yet follow the headset when you physically walk
-around your room, so in a small play space you can put your head through a wall. It needs
-real level geometry to tune against and lands in Sprint 1.1.
+Room-scale walking is handled: the capsule follows your head, and the play space slides back
+by the same amount so nothing moves the view. When the capsule can't follow — you have
+physically walked your head into a wall — the view fades out instead, because the only other
+options are moving the camera (forbidden) or letting you see through the level.
 
 ### Desktop VR emulator
 
@@ -178,6 +194,14 @@ the next VR entry.
   (`src/core/physics.tsx`), not from its own. Two accumulators both nominally at 60Hz drift
   in and out of phase, and a character controller querying a world that is sometimes half a
   step stale inherits that jitter into ground detection and every raycast downstream.
+- **`src/systems/interaction.ts`** — one focus, picked once per step, shared by desktop and
+  VR. Desktop looks at a thing and presses a key; VR points at it or reaches for it. The
+  moment "what is the player addressing?" gets answered in two places, the two modes start
+  disagreeing about what is interactive, and nobody notices until a door won't open in the
+  headset.
+- **Text is rasterised on a canvas** (`src/ui/label.ts`), not fetched as a font. SDF text
+  libraries pull a default font from a CDN on first use, and a dungeon that silently loses
+  all its text when the network hiccups is not a trade worth making.
 - **Player state is a plain singleton** (`src/systems/player.ts`), like `xrInput`. The
   vignette reads it every frame; enemy aggro and the scare director will read it sixty times
   a second. None of that should re-render the scene graph.
@@ -195,7 +219,10 @@ src/
 scripts/     smoke test
 ```
 
-The smoke test does more than check that something rendered: it walks the player up the
-greybox staircase and jumps, asserting they stay grounded and inside the level. A player
-sinking through the floor or strolling out through a wall renders a completely convincing
-room the whole way, which is exactly why a screenshot can't catch it.
+The smoke test does more than check that something rendered. It walks the player across the
+foyer until the door offers itself, presses `Space`, and asserts that a wave started, that
+the player did *not* also jump, and that they can then walk through the doorway — then loads
+the greybox and walks them up the staircase and jumps, asserting they stay grounded and
+inside the level. A player sinking through the floor, strolling out through a wall, or
+getting a prompt for the wrong object renders a completely convincing room the whole way,
+which is exactly why a screenshot can't catch any of it.

@@ -105,8 +105,15 @@ export function ComfortVignette() {
     // VR only. On a monitor there is no vestibular conflict to mask — the player knows
     // perfectly well they are sitting still — so the same tunnel just reads as the game
     // going dark at the edges every time they walk.
+    // A head that has physically walked past what the capsule can reach closes the view
+    // regardless of the comfort setting: at that point the alternative is letting the player
+    // look through the level, and `comfortVignette: 0` is a statement about motion sickness,
+    // not a request to see the inside of the walls.
     const target = gl.xr.isPresenting
-      ? vignetteTarget(playerState.speed, maxSpeed, playerState.turning, strength)
+      ? Math.max(
+          vignetteTarget(playerState.speed, maxSpeed, playerState.turning, strength),
+          playerState.headBlocked,
+        )
       : 0
     const halfLife = target > amount.current ? CLOSE_HALF_LIFE : OPEN_HALF_LIFE
     amount.current = damp(amount.current, target, halfLife, delta)

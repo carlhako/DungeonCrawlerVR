@@ -97,6 +97,12 @@ export class FixedLoop {
  */
 export const SystemOrder = {
   Input: 0,
+  /**
+   * Level geometry that moves under its own logic — doors, lifts, later the traps. Runs
+   * before the player so a door that swung open this step is already open when the player's
+   * movement is resolved against it, rather than a step behind.
+   */
+  World: 50,
   Player: 100,
   AI: 200,
   Physics: 300,

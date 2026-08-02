@@ -1,5 +1,7 @@
 import { gameLoop } from './loop'
 import { playerState, type PlayerState } from '@/systems/player'
+import { interactionState } from '@/systems/interaction'
+import { runState } from '@/systems/run'
 
 /**
  * Dev-only handle onto the running game, hung off `window.__DCVR__`.
@@ -25,6 +27,16 @@ export interface DebugHandle {
    * still renders a perfectly convincing room.
    */
   readonly player: PlayerState
+  /**
+   * What the player is currently addressing, flattened to plain data.
+   *
+   * The smoke test needs to assert that walking up to the door offers the door — which is
+   * the half of the interaction system a screenshot can't show, since a prompt that appears
+   * for the wrong object looks exactly as convincing as one that doesn't.
+   */
+  readonly focus: { id: string; label: string; source: string; distance: number } | null
+  /** Waves started this session. The acceptance test for Sprint 1.1. */
+  readonly wavesStarted: number
 }
 
 export function installDebugHandle(): void {
@@ -39,6 +51,19 @@ export function installDebugHandle(): void {
     },
     get player() {
       return playerState
+    },
+    get focus() {
+      const focus = interactionState.focus
+      if (!focus) return null
+      return {
+        id: focus.id,
+        label: focus.label,
+        source: interactionState.source,
+        distance: +interactionState.distance.toFixed(3),
+      }
+    },
+    get wavesStarted() {
+      return runState.wavesStarted
     },
   }
   ;(window as unknown as { __DCVR__: DebugHandle }).__DCVR__ = handle

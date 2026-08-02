@@ -7,15 +7,14 @@ sprint, before committing. The roadmap itself lives in [PLAN.md](PLAN.md).
 
 ## Current position
 
-> **Next up: Sprint 1.1 — Foyer scene & interaction**
+> **Next up: Sprint 1.2 — Game state & persistence**
 >
-> **Epic 0 is complete and signed off on the Quest 3.** There is a physics world, a
-> character controller that handles steps and slopes, and movement schemes for both desktop
-> and VR — smooth and teleport locomotion, smooth and snap turning, and a comfort vignette,
-> all persisted.
+> Sprint 1.1 is built and verified on desktop, but **awaiting VR sign-off on the Quest 3** —
+> pointing at a handle, reaching for it, and room-scale walking are all things a monitor
+> cannot judge. See the checklist in the sprint log below.
 >
-> Everything from here builds on a player who can already move. Sprint 1.1 is the first
-> sprint with actual *game* in it.
+> The game now opens in a torch-lit foyer with a door that starts a wave. Epic 0's greybox
+> is still at `?scene=greybox` as the movement test rig.
 
 ---
 
@@ -26,8 +25,8 @@ sprint, before committing. The roadmap itself lives in [PLAN.md](PLAN.md).
 | **0 — Foundation & VR Bootstrap** | 0.1 Project scaffold | ✅ Done |
 | | 0.2 WebXR on Quest 3 | ✅ Done |
 | | 0.3 Movement & physics | ✅ Done |
-| **1 — Foyer & Meta Loop** | 1.1 Foyer scene & interaction | ⬜ Next |
-| | 1.2 Game state & persistence | ⬜ |
+| **1 — Foyer & Meta Loop** | 1.1 Foyer scene & interaction | 🟡 Awaiting headset sign-off |
+| | 1.2 Game state & persistence | ⬜ Next |
 | | 1.3 Shop & weapon dialog | ⬜ |
 | **2 — Wave Combat Core** | 2.1 Procedural dungeon generation | ⬜ |
 | | 2.2 Weapon & attack framework | ⬜ |
@@ -201,6 +200,77 @@ Decisions made during the sprint:
 - Still open from 0.2: `Space` is jump here, but PLAN.md has it activating the door in
   Sprint 1.1. Likely resolution is contextual — activate when a prompt is showing, otherwise
   jump.
+
+### 🟡 Sprint 1.1 — Foyer scene & interaction
+
+**Verified on desktop:** typecheck clean · 153/153 unit tests · production build succeeds ·
+smoke test walks the acceptance test end to end — across the foyer until the door offers
+itself, `Space` to open it, a wave started, no accidental jump, and out through the doorway —
+then loads the greybox and re-runs the whole Sprint 0.3 movement course.
+
+**Awaiting VR sign-off.** In the headset, check:
+
+1. **Point** — aim the right controller at the door handle from across the room. The prompt
+   should appear, name the trigger, and open the door when you pull it.
+2. **Reach** — walk up and put your hand on the handle instead. The prompt should switch to
+   naming the grip, and the door should open to either trigger or grip.
+3. **The right thing** — stand next to the shop bell while pointing at the door. What your
+   hand is on wins; it must never address the far object.
+4. **Room-scale** — physically walk a few steps with the stick untouched. Your body comes
+   with you (walk to a wall and you are stopped by it, not by an invisible box back at the
+   spawn point), and nothing moves your view while it happens.
+5. **Blocked head** — deliberately walk your head into a wall. The view should fade out
+   rather than let you see through the level, and come back as you step away.
+6. **Turning while offset** — walk a couple of metres to one side of where you started, then
+   turn. The turn should still be centred on you, not swing you around an arc.
+
+Delivered:
+
+- `src/systems/interaction.ts` — the focus model: candidates register, one focus is picked
+  per fixed step by reach, proximity or ray, and everything downstream reads it. 21 tests.
+- `src/systems/InteractionDriver.tsx` — picks the focus from the camera on desktop and from
+  both hands in VR, and turns a button press into an activation.
+- `src/ui/InteractPrompt.tsx` + `src/ui/label.ts` — the world-space prompt, with text
+  rasterised on a 2D canvas.
+- `src/entities/Door.tsx` — a hinged kinematic door with a grabbable handle, which calls
+  `startWave()` when it opens.
+- `src/scenes/Foyer.tsx` — the room, with flickering torches, a shop counter for Sprint 1.3
+  and a dark vestibule beyond the door.
+- `src/systems/run.ts` — `startWave()`, deliberately a stub until 1.2.
+- `src/entities/PlayerRig.tsx` — room-scale recentring, and `Space` resolved contextually.
+
+Decisions made during the sprint:
+
+- **Desktop needs proximity, VR does not.** A standing eye at 1.6m pointing dead level sails
+  over a door handle at 1.05m *at every distance*, so a pure look-ray means the door is never
+  offered and reads as broken. Reaching for something with your hand already answers the
+  question in VR.
+- **Reach beats ray, always.** "Nearest wins" reads as the game changing its mind about what
+  you are holding as your hand drifts. Touch it, or point at it — a rule you can feel.
+- **`Space` is contextual.** The interaction system runs before the player controller and
+  reports whether it spent the key. A separate "use" key is one more thing to explain, and
+  you are never trying to jump and open a door at the same instant.
+- **Text is rasterised on a canvas, not fetched as a font.** The SDF text libraries pull a
+  default font from a CDN on first use. A dungeon that silently loses all its text on a
+  flaky connection is not worth nicer kerning. Revisit with a committed font file if the
+  Sprint 1.3 shop panel needs to scale smoothly.
+- **The door swings away from the player.** It is a solid kinematic collider; opening it
+  towards them shoves them backwards, which is exactly the unrequested motion the comfort
+  rule forbids. The sign is easy to get backwards and was, at first — caught by the smoke
+  test, which found the player barged sideways out of their own doorway.
+- **Room-scale is a second, separate collider query.** Locomotion resolves first, then the
+  capsule is asked to chase the head; keeping them apart is what makes it possible to know
+  how much of the *head's* movement the world refused, which is what drives the fade.
+- **A blocked head fades the view even at `comfortVignette: 0`.** That setting is a statement
+  about motion sickness, not a request to see the inside of the walls. There is no third
+  option: the alternative is moving the camera.
+- **The foyer is bright, on purpose.** It is the one room that is meant to feel safe, and the
+  dungeon's darkness is worth nothing without it. A dim foyer costs the dungeon its impact.
+- Known gap: the foyer is built from primitives at real scale, not from an art kit. No CC0
+  assets have been imported yet — that lands with the tile kit in Sprint 2.1, and this room's
+  layout is the brief for it.
+- Retired: `XRDiagnostics` now only mounts in the greybox, where it is still the fastest way
+  to tell a dead thumbstick from broken locomotion.
 
 ---
 

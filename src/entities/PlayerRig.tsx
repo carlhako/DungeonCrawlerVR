@@ -16,12 +16,15 @@ import {
   MAX_TELEPORT_SLOPE_DEGREES,
   applyDeadzone,
   createTurnLatch,
+  headBlockAmount,
   headingFromBasis,
   integrateVertical,
   moveDirection,
+  rotateY,
   smoothTurn,
   snapTurn,
 } from '@/systems/locomotion'
+import { interactionState } from '@/systems/interaction'
 import {
   DESKTOP_EYE_HEIGHT,
   PLAYER_CENTRE_OFFSET,
@@ -47,6 +50,14 @@ import { consumeTeleport } from '@/entities/Teleport'
 
 const STICK_DEADZONE = 0.15
 const DEG = Math.PI / 180
+
+/**
+ * Below this, the capsule is already under the head and recentring is skipped.
+ *
+ * Head tracking is never perfectly still — it moves with your pulse — and chasing sub-
+ * millimetre noise would run a collider query every step for a shift nobody can see.
+ */
+const RECENTRE_EPSILON = 0.002
 
 /** Character controller tuning. Distances in metres. */
 const CONTROLLER = {
@@ -82,6 +93,7 @@ export function PlayerRig() {
   // kinematic rigid body would push the rotation through the physics pipeline for no gain,
   // since a capsule is rotationally symmetric anyway.
   const yawGroup = useRef<Group>(null)
+  const originGroup = useRef<Group>(null)
 
   // Published so world queries can exclude the player — the teleport arc starts inside this
   // capsule, and weapon raycasts (Sprint 2.2) would otherwise shoot the player in the chest.
@@ -104,12 +116,24 @@ export function PlayerRig() {
 
       {/* Dropped back down to the player's feet: XROrigin marks the floor they stand on,
           while the rigid body's origin is the centre of the capsule. Head height comes from
-          the headset's own floor-relative tracking and is never set here. */}
+          the headset's own floor-relative tracking and is never set here.
+
+          The inner group carries the room-scale recentring offset — see `recentre`. It is
+          separate from the yaw group so that turning rotates the play space *and* the offset
+          together, which is what keeps a turn centred on the player's head rather than on a
+          capsule they may be standing a metre away from. */}
       <group ref={yawGroup} position={[0, -PLAYER_CENTRE_OFFSET, 0]}>
-        <XROrigin />
+        <group ref={originGroup}>
+          <XROrigin />
+        </group>
       </group>
 
-      <CharacterController body={body} collider={collider} yawGroup={yawGroup} />
+      <CharacterController
+        body={body}
+        collider={collider}
+        yawGroup={yawGroup}
+        originGroup={originGroup}
+      />
     </RigidBody>
   )
 }
@@ -118,9 +142,10 @@ interface ControllerProps {
   body: React.RefObject<RapierRigidBody | null>
   collider: React.RefObject<Collider | null>
   yawGroup: React.RefObject<Group | null>
+  originGroup: React.RefObject<Group | null>
 }
 
-function CharacterController({ body, collider, yawGroup }: ControllerProps) {
+function CharacterController({ body, collider, yawGroup, originGroup }: ControllerProps) {
   const { world } = useRapier()
   const gl = useThree((state) => state.gl)
   const camera = useThree((state) => state.camera)
@@ -173,6 +198,7 @@ function CharacterController({ body, collider, yawGroup }: ControllerProps) {
       forward: new Vector3(),
       up: new Vector3(),
       desired: { x: 0, y: 0, z: 0 },
+      recentre: { x: 0, y: 0, z: 0 },
       euler: new Euler(0, 0, 0, 'YXZ'),
     }),
     [],
@@ -199,7 +225,8 @@ function CharacterController({ body, collider, yawGroup }: ControllerProps) {
 
       // Head-relative in VR: you walk where you look. The heading already includes the
       // rig's yaw, because it is read from a world matrix.
-      const facing = inVR ? headHeading(gl, camera, scratch) : desktopInput.yaw
+      if (inVR) readHead(gl, camera, scratch)
+      const facing = inVR ? headingFromBasis(scratch.forward, scratch.up) : desktopInput.yaw
       const stick = inVR
         ? applyDeadzone(xrInput.left.thumbstick.x, xrInput.left.thumbstick.y, STICK_DEADZONE)
         : desktopInput.move
@@ -209,7 +236,13 @@ function CharacterController({ body, collider, yawGroup }: ControllerProps) {
       const move = teleporting ? { x: 0, y: 0 } : moveDirection(stick, facing)
       const speed =
         config.moveSpeed * (!inVR && desktopInput.sprint ? SPRINT_MULTIPLIER : 1)
-      const jump = inVR ? xrInput.right.primary.justPressed : desktopInput.jump.justPressed
+      // Space is contextual on desktop: if the interaction system spent it opening a door
+      // this step, it is not also a jump. The alternative is a second key for "use", which
+      // is one more thing to explain for no gain — you are never trying to jump and open a
+      // door at the same instant.
+      const jump = inVR
+        ? xrInput.right.primary.justPressed
+        : desktopInput.jump.justPressed && !interactionState.consumedActivate
 
       scratch.desired.x = move.x * speed * dt
       scratch.desired.z = move.y * speed * dt
@@ -237,12 +270,58 @@ function CharacterController({ body, collider, yawGroup }: ControllerProps) {
 
       // A completed teleport is an absolute move, not a translation to be resolved — the
       // whole point is that it skips the space in between.
+      // Room-scale: bring the capsule under wherever the player has physically walked their
+      // head, and slide the play space back by the same amount so the head does not move in
+      // world space as a result. Without this, walking two metres across your living room
+      // leaves your body behind at the spawn point and you can put your head through a wall.
+      if (inVR) {
+        const originNode = originGroup.current
+        const headX = scratch.headMatrix.elements[12] ?? 0
+        const headZ = scratch.headMatrix.elements[14] ?? 0
+        const wantX = headX - nextX
+        const wantZ = headZ - nextZ
+
+        if (originNode && Math.hypot(wantX, wantZ) > RECENTRE_EPSILON) {
+          scratch.recentre.x = wantX
+          scratch.recentre.y = 0
+          scratch.recentre.z = wantZ
+          // Resolved separately from locomotion rather than summed into it: we need to know
+          // how much of *this* movement the world allowed, and a combined result can't be
+          // taken apart again.
+          character.computeColliderMovement(capsule, scratch.recentre)
+          const shift = character.computedMovement()
+
+          nextX += shift.x
+          nextZ += shift.z
+
+          // The offset lives in the yaw group's rotated frame, so the world-space shift has
+          // to be rotated back into it before it can be subtracted.
+          const local = rotateY(shift.x, shift.z, -playerState.yaw)
+          originNode.position.x -= local.x
+          originNode.position.z -= local.y
+
+          // Whatever the wall refused to give us is the gap between the head and the body.
+          playerState.headBlocked = headBlockAmount(
+            Math.hypot(wantX - shift.x, wantZ - shift.z),
+          )
+        } else {
+          playerState.headBlocked = 0
+        }
+      } else if (playerState.headBlocked !== 0) {
+        playerState.headBlocked = 0
+      }
+
       const landing = teleporting ? consumeTeleport() : null
       if (landing) {
         nextX = landing.x
         nextY = landing.y + PLAYER_CENTRE_OFFSET
         nextZ = landing.z
         scratch.vertical.velocity = 0
+        playerState.headBlocked = 0
+        // The recentring offset is deliberately left alone. It already holds exactly minus
+        // the player's physical standing offset, which is what keeps their head over the
+        // capsule — so moving the capsule to the marker moves their head to the marker.
+        // Zeroing it here would land them wherever they happen to be stood in the room.
       }
 
       rigidBody.setNextKinematicTranslation({ x: nextX, y: nextY, z: nextZ })
@@ -307,22 +386,24 @@ interface HeadScratch {
 }
 
 /**
- * The world-space yaw the player's head is facing.
+ * Read the head pose into scratch: its world matrix, and the forward and up axes.
  *
  * Reads `gl.xr.getCamera()` rather than the R3F camera while presenting: three updates the
  * XR camera from the frame's pose at the top of the animation callback, before any of our
  * systems run, so this is the current frame's head rather than the previous frame's.
+ *
+ * Taken once per step and shared, because both consumers — the walking direction and the
+ * room-scale recentring — must agree about where the head is within a step.
  */
-function headHeading(
+function readHead(
   gl: { xr: { isPresenting: boolean; getCamera: () => { matrixWorld: Matrix4 } } },
   fallback: { matrixWorld: Matrix4 },
   scratch: HeadScratch,
-): number {
+): void {
   const head = gl.xr.isPresenting ? gl.xr.getCamera() : fallback
   scratch.headMatrix.copy(head.matrixWorld)
   const e = scratch.headMatrix.elements
   // Columns 1 and 2 of the rotation basis: +Y is up, -Z is forward.
   scratch.up.set(e[4], e[5], e[6])
   scratch.forward.set(-e[8], -e[9], -e[10])
-  return headingFromBasis(scratch.forward, scratch.up)
 }

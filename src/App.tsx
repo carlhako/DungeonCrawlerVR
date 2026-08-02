@@ -7,8 +7,11 @@ import { FIXED_STEP } from '@/core/loop'
 import { SimulationDriver } from '@/core/simulation'
 import { PhysicsDriver } from '@/core/physics'
 import { xrStore } from '@/core/xr'
+import { Foyer } from '@/scenes/Foyer'
 import { GreyboxRoom } from '@/scenes/GreyboxRoom'
 import { XRDiagnostics } from '@/scenes/XRDiagnostics'
+import { InteractionDriver } from '@/systems/InteractionDriver'
+import { InteractPrompt } from '@/ui/InteractPrompt'
 import { PlayerRig } from '@/entities/PlayerRig'
 import { TeleportAim } from '@/entities/Teleport'
 import { ComfortVignette } from '@/ui/ComfortVignette'
@@ -26,8 +29,29 @@ import {
 import { VRButton } from '@/ui/VRButton'
 import { DesktopHint } from '@/ui/DesktopHint'
 
+/**
+ * Which room to load. The foyer is the game; the greybox is the movement test rig.
+ *
+ * Kept rather than deleted, and reachable at `?scene=greybox`, because it is the only place
+ * with a staircase, a ramp and a ledge to walk at — the character controller's behaviour is
+ * invisible without them, and the smoke test still drives it.
+ */
+const scene = new URLSearchParams(window.location.search).get('scene') === 'greybox'
+  ? 'greybox'
+  : 'foyer'
+
 function SceneLighting() {
   const { ambient, keyIntensity, keyHeight } = useLightingControls()
+
+  // The foyer lights itself with torches. A key light here would flatten them and hand the
+  // room a sun it has no window for — and the contrast between this room and the dark past
+  // the door is the entire point of the foyer.
+  // A warm, low fill so the corners the torches don't reach are dim rather than pitch black.
+  // Tinted, because neutral ambient in a torch-lit room reads as moonlight.
+  if (scene === 'foyer') {
+    return <ambientLight intensity={ambient * 0.9} color="#ffcfa0" />
+  }
+
   return (
     <>
       <ambientLight intensity={ambient} />
@@ -59,13 +83,15 @@ function World() {
     >
       <PhysicsDriver />
       <SceneLighting />
-      <GreyboxRoom />
+      {scene === 'foyer' ? <Foyer /> : <GreyboxRoom />}
       <PlayerRig />
       <TeleportAim />
-      {/* Sprint 0.2 scaffolding, kept because it is still how you tell "the stick is dead"
-          apart from "locomotion is broken" while wearing a headset. Retires in Sprint 1.1
-          when the foyer lands. No collider — you walk straight through it. */}
-      <XRDiagnostics />
+      <InteractionDriver />
+      <InteractPrompt />
+      {/* Sprint 0.2's controller readout, kept only in the greybox now that the foyer has
+          real things to point at. It is still the fastest way to tell "the stick is dead"
+          apart from "locomotion is broken" while wearing a headset. */}
+      {scene === 'greybox' && <XRDiagnostics />}
     </Physics>
   )
 }

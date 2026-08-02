@@ -7,10 +7,14 @@ import {
   createTurnLatch,
   damp,
   findArcHit,
+  HEAD_BLOCK_FULL,
+  HEAD_BLOCK_START,
+  headBlockAmount,
   headingFromBasis,
   integrateVertical,
   isValidLanding,
   moveDirection,
+  rotateY,
   sampleArc,
   smoothTurn,
   snapTurn,
@@ -291,6 +295,66 @@ describe('damp', () => {
 
   it('snaps immediately at a zero half-life', () => {
     expect(damp(0, 1, 0, 0.016)).toBe(1)
+  })
+})
+
+describe('rotateY', () => {
+  it('is the identity at zero', () => {
+    const result = rotateY(1, 2, 0)
+    expect(result.x).toBeCloseTo(1, 9)
+    expect(result.y).toBeCloseTo(2, 9)
+  })
+
+  it('matches three.js: +X goes to -Z at a quarter turn', () => {
+    // The convention that matters — get this backwards and the room-scale play space drifts
+    // sideways a little further every time the player turns.
+    const result = rotateY(1, 0, Math.PI / 2)
+    expect(result.x).toBeCloseTo(0, 9)
+    expect(result.y).toBeCloseTo(-1, 9)
+  })
+
+  it('round-trips through the inverse angle', () => {
+    for (const angle of [0.3, 1.9, -2.7, 6.0]) {
+      const there = rotateY(0.4, -1.3, angle)
+      const back = rotateY(there.x, there.y, -angle)
+      expect(back.x).toBeCloseTo(0.4, 9)
+      expect(back.y).toBeCloseTo(-1.3, 9)
+    }
+  })
+
+  it('preserves length', () => {
+    const result = rotateY(3, 4, 1.1)
+    expect(Math.hypot(result.x, result.y)).toBeCloseTo(5, 9)
+  })
+})
+
+describe('headBlockAmount', () => {
+  it('ignores the skin width the capsule always keeps', () => {
+    // The controller holds a 2cm gap off every surface by design, so brushing a wall must
+    // not black the view out.
+    expect(headBlockAmount(0)).toBe(0)
+    expect(headBlockAmount(0.02)).toBe(0)
+    expect(headBlockAmount(HEAD_BLOCK_START)).toBe(0)
+  })
+
+  it('is fully closed once the head is properly through', () => {
+    expect(headBlockAmount(HEAD_BLOCK_FULL)).toBe(1)
+    expect(headBlockAmount(2)).toBe(1)
+  })
+
+  it('ramps rather than snapping', () => {
+    const mid = headBlockAmount((HEAD_BLOCK_START + HEAD_BLOCK_FULL) / 2)
+    expect(mid).toBeGreaterThan(0.4)
+    expect(mid).toBeLessThan(0.6)
+  })
+
+  it('never decreases as the head goes further', () => {
+    let previous = 0
+    for (let overshoot = 0; overshoot < 0.4; overshoot += 0.005) {
+      const value = headBlockAmount(overshoot)
+      expect(value).toBeGreaterThanOrEqual(previous)
+      previous = value
+    }
   })
 })
 
