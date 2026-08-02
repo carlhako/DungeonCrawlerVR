@@ -20,12 +20,21 @@ npm install
 npm run dev
 ```
 
-Open <http://localhost:5173>.
+The dev server binds `0.0.0.0`, so it is reachable from other machines on the network. Vite
+prints both URLs on startup:
+
+```
+➜  Local:   http://localhost:5173/
+➜  Network: http://10.0.1.54:5173/
+```
+
+Use the **Network** URL from your desktop or laptop. Plain HTTP is fine for desktop
+testing — but **VR needs HTTPS**, so use `npm run dev:xr` for the headset (see below).
 
 | Script | What it does |
 | --- | --- |
-| `npm run dev` | Dev server on localhost (http) |
-| `npm run dev:xr` | Dev server over HTTPS on the LAN — required for Quest 3 |
+| `npm run dev` | Dev server on `0.0.0.0:5173` (http) — localhost and LAN |
+| `npm run dev:xr` | Same, but over HTTPS — required for Quest 3 |
 | `npm run build` | Typecheck, then production build to `dist/` |
 | `npm test` | Unit tests (gameplay logic) |
 | `npm run smoke` | Headless render check against a running dev server |

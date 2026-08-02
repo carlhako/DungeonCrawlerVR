@@ -11,8 +11,14 @@ export default defineConfig(({ mode }) => ({
     alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
   },
   server: {
+    // Bind 0.0.0.0 so other machines on the LAN (desktop, laptop, headset) can reach the
+    // dev server, not just this box. Vite prints the reachable network URLs on startup.
+    host: true,
     port: 5173,
     strictPort: true,
+    // Vite blocks unrecognised Host headers by default; LAN IPs are fine for a dev server
+    // on a trusted network and this avoids a confusing "Blocked request" page.
+    allowedHosts: true,
   },
   build: {
     target: 'es2022',
