@@ -7,8 +7,8 @@ sprint, before committing. The roadmap itself lives in [PLAN.md](PLAN.md).
 
 ## Current position
 
-> **Sprint 1.3 is built; the first Quest 3 pass found two defects in the shop, both now
-> fixed — awaiting a second headset pass.**
+> **Sprint 1.3 is built; two Quest 3 passes have each found defects in the shop and its
+> pointer, all now fixed — awaiting a third headset pass.**
 >
 > Epic 1 is now complete end to end: start with 100 gold, buy and equip a weapon at a board
 > on the shop counter, open the door, clear a wave, come back richer and spend it. All of it
@@ -365,6 +365,29 @@ Covered by seven new tests built on the real board geometry (`interaction.test.t
 buttons on a panel") and by a new smoke step that stands 1.8m back and aims 15cm off the
 centre of a button — an ordinary way to use a board, and a certain miss before this.
 
+**Headset pass 2 (2026-08-03) — the picking works; the pointer itself was wrong twice
+over.** Reported: "the virtual controllers have 2 pointers, one must be a default that
+hasn't been turned off"; and "the new one points the wrong direction, I have to almost point
+the controller at the ground to hit the buttons."
+
+- **Two beams.** `@react-three/xr`'s default controller ships a ray pointer for DOM-style
+  pointer events on 3D objects. We don't use those — interaction goes through
+  `src/systems/interaction.ts`, which owns the one-focus-per-step rule — so it was drawing a
+  second line that nothing in the game read. The store now takes our own controller
+  (`src/entities/XRController.tsx`): the model, an aim anchor, and no pointers.
+- **The beam pointed at the floor.** WebXR gives an input source two poses. The **grip** pose
+  sits in the fist with its axes following the controller's body; the **target ray** pose is
+  the one the runtime says the player is aiming with, tilted up from the grip by roughly the
+  angle at which a controller sits in a relaxed hand. `@react-three/xr` only exposes the grip
+  object — it is where the controller model hangs — so aiming with its -Z meant aiming down
+  the controller's body at the ground. `src/systems/xrAim.ts` now publishes each hand's
+  target ray pose, and the beam, the picker's ray and the teleport arc all use it. Touching
+  still uses the grip, which is the pose that knows where the hand is.
+
+The teleport arc was aimed from the grip too. It read as usable because an arc bends
+downwards anyway, but it was aimed several degrees below where the hand was pointing the
+whole time; it now agrees with the beam.
+
 **Verified on desktop:** typecheck clean · 242/242 unit tests · production build succeeds ·
 smoke test buys and equips a weapon *through the panel* — walking to the counter, aiming at
 each button, pressing the key — including a purchase it cannot afford, then reloading the
@@ -374,14 +397,18 @@ page and finding the gold, the weapon, the loadout and the wave number all still
 
 1. Walk to the counter. The board reads your gold, the three weapons and what you own.
 2. **Stand back a step and point** at a weapon row, with either hand, and pull the trigger.
-   The beam should reach the row you are aimed at, that row alone should highlight, and
-   aiming anywhere along it — not just at its centre — should work.
+   There should be exactly **one** beam per hand, leaving along the line the controller looks
+   like it is aiming down — not tipped at the floor. The beam should reach the row you are
+   aimed at, that row alone should highlight, and aiming anywhere along it — not just at its
+   centre — should work.
 3. **Reach out** and press a button with your hand instead. The button under your hand must
    win over whatever the ray is crossing — and it must be the button you are touching, not
    its neighbour. Try the row directly above and below the one you want, deliberately.
 4. Buy something you can afford, then put it in each hand in turn.
 5. Try to buy something you cannot afford. The refusal must say why, on the board.
 6. Reload the page. Everything you bought and equipped is still there.
+7. Switch to teleport locomotion and aim the arc. It now leaves along the same line as the
+   beam, so check it still lands where you expect after years of muscle memory elsewhere.
 
 Delivered:
 

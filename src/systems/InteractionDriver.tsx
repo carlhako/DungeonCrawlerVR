@@ -20,6 +20,7 @@ import {
 } from '@/systems/interaction'
 import { Haptic, pulsePreset } from '@/systems/haptics'
 import { xrInput } from '@/systems/xrInput'
+import { xrAim } from '@/systems/xrAim'
 
 /**
  * Drives the interaction focus once per fixed step, and turns a button press into an
@@ -78,32 +79,44 @@ export function InteractionDriver() {
       rayHand.current = null
 
       if (inVR) {
-        for (const pad of [rightPad, leftPad]) {
-          const object = pad?.object
-          if (!object) continue
-          object.getWorldPosition(scratch.origin)
-          object.getWorldQuaternion(scratch.rotation)
-          scratch.direction.set(0, 0, -1).applyQuaternion(scratch.rotation)
+        for (const [handedness, pad] of [
+          ['right', rightPad],
+          ['left', leftPad],
+        ] as const) {
+          const grip = pad?.object
 
           // Near-grab from either hand, at the tip rather than at the grip. The controller's
           // reported pose sits in the palm, several centimetres behind where the player feels
           // their hand end, so touching a board with the grip origin means pushing your hand
           // into it up to the knuckles.
-          scratch.hand
-            .copy(scratch.origin)
-            .addScaledVector(scratch.direction, CONTROLLER_TIP_OFFSET)
-          const touched = pickByReach(interactables, scratch.hand)
-          if (touched && (!reach || touched.distance < reach.distance)) {
-            reach = touched
-            reachHand = pad ?? null
+          if (grip) {
+            grip.getWorldPosition(scratch.origin)
+            grip.getWorldQuaternion(scratch.rotation)
+            scratch.direction.set(0, 0, -1).applyQuaternion(scratch.rotation)
+            scratch.hand
+              .copy(scratch.origin)
+              .addScaledVector(scratch.direction, CONTROLLER_TIP_OFFSET)
+            const touched = pickByReach(interactables, scratch.hand)
+            if (touched && (!reach || touched.distance < reach.distance)) {
+              reach = touched
+              reachHand = pad ?? null
+            }
           }
 
-          // Pointing, along the same -Z the teleport arc uses. Both hands, because which one
-          // a player points with is a matter of handedness, not of what the game supports.
-          const aimed = pickByRay(interactables, scratch.origin, scratch.direction)
-          if (aimed && (!ray || aimed.distance < ray.distance)) {
-            ray = aimed
-            rayHand.current = pad ?? null
+          // Pointing uses the *target ray* pose, not the grip: the grip's axes follow the
+          // shape of the controller and its -Z runs down towards the floor, so aiming with
+          // it means tipping your wrist at the ground. Both hands, because which one a
+          // player points with is a matter of handedness, not of what the game supports.
+          const aim = xrAim[handedness]
+          if (aim) {
+            aim.getWorldPosition(scratch.origin)
+            aim.getWorldQuaternion(scratch.rotation)
+            scratch.direction.set(0, 0, -1).applyQuaternion(scratch.rotation)
+            const aimed = pickByRay(interactables, scratch.origin, scratch.direction)
+            if (aimed && (!ray || aimed.distance < ray.distance)) {
+              ray = aimed
+              rayHand.current = pad ?? null
+            }
           }
         }
       } else {

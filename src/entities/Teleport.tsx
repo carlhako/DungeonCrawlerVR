@@ -26,6 +26,7 @@ import { playerCollider, playerState } from '@/systems/player'
 import { useSettings } from '@/systems/settings'
 import { Haptic, pulsePreset } from '@/systems/haptics'
 import { xrInput } from '@/systems/xrInput'
+import { xrAim } from '@/systems/xrAim'
 
 /**
  * Teleport locomotion: aim a ballistic arc from the right controller, release to move.
@@ -183,7 +184,10 @@ export function TeleportAim() {
   useFixedUpdate(
     () => {
       const { controller: pad, enabled: on } = latest.current
-      const pointer = pad?.object
+      // The target ray pose, not the grip: the grip's -Z runs down the controller's body,
+      // which would launch the arc at the player's feet. Same pose the pointer beam uses,
+      // so the two never disagree about where the hand is aimed.
+      const pointer = xrAim.right
 
       if (!on || pointer == null) {
         stopAiming()
@@ -197,7 +201,7 @@ export function TeleportAim() {
       if (aiming) {
         pointer.getWorldPosition(scratch.origin)
         pointer.getWorldQuaternion(scratch.rotation)
-        // A controller points along its own -Z.
+        // A target ray points along its own -Z.
         scratch.direction.set(0, 0, -1).applyQuaternion(scratch.rotation)
 
         runtime.points = sampleArc(scratch.origin, scratch.direction)

@@ -59,7 +59,7 @@ inert until you do. `Esc` releases it.
 | Left thumbstick | Move (smooth mode) / aim the teleport arc (teleport mode) |
 | Right thumbstick | Turn — smooth by default, snap optional |
 | Right controller | Points the teleport arc |
-| Either controller | Points the interaction ray — a dim beam shows where |
+| Either controller | Points the interaction ray — one dim beam per hand shows where |
 | Trigger | Use whatever your beam is on, or whatever your hand is touching |
 | Grip | Use whatever your hand is on (near-grab only) |
 | `A` | Jump (smooth mode only) |
@@ -244,6 +244,12 @@ the next VR entry.
   headset. Candidates are spheres by default and *rectangles* when they declare a `surface`:
   a shop button is drawn 45cm wide and 7cm tall, and picking the sphere inscribed in it made
   the panel unusable from more than a hand's reach away.
+- **Aiming uses the target ray pose, holding uses the grip pose** (`src/systems/xrAim.ts`).
+  WebXR reports both for every controller, and `@react-three/xr` only hands us the grip one
+  because that is where the controller model hangs. Its -Z runs down the controller's body,
+  so a beam drawn along it points at the player's feet. `src/entities/XRController.tsx`
+  replaces the library's default controller to publish the target ray pose — and to *not*
+  draw the library's own ray pointer, which was a second beam obeying a different picker.
 - **Text is rasterised on a canvas** (`src/ui/label.ts`), not fetched as a font. SDF text
   libraries pull a default font from a CDN on first use, and a dungeon that silently loses
   all its text when the network hiccups is not a trade worth making.

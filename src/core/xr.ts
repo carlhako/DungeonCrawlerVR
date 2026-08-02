@@ -1,4 +1,5 @@
 import { createXRStore } from '@react-three/xr'
+import { GameXRController } from '@/entities/XRController'
 import { readStoredSettings } from '@/systems/settings'
 
 /**
@@ -39,6 +40,11 @@ export const xrStore = createXRStore({
   // combat design is trigger-fire and velocity-based swings, neither of which works
   // without a controller in your fist.
   hand: false,
+
+  // Our own controller instead of the default one, which comes with a ray pointer we don't
+  // want: the game draws its own beam from its own picker, and two rays out of one hand
+  // disagreeing about what you have selected is worse than none.
+  controller: GameXRController,
 
   // Every optional feature requested is work the runtime does on our behalf, so ask for
   // nothing we don't use. `layers` stays on: it lets the compositor sample the eye buffers

@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
-import { useXR, useXRInputSourceState } from '@react-three/xr'
-import type { XRControllerState } from '@react-three/xr'
+import { useXR } from '@react-three/xr'
 import {
   BufferAttribute,
   BufferGeometry,
@@ -10,9 +9,11 @@ import {
   LineBasicMaterial,
   Quaternion,
   Vector3,
+  type Object3D,
 } from 'three'
 import { interactionState } from '@/systems/interaction'
 import { playerState } from '@/systems/player'
+import { xrAim } from '@/systems/xrAim'
 
 /**
  * The line out of each controller that shows where you are pointing.
@@ -37,11 +38,9 @@ const ACTIVE_OPACITY = 0.85
 
 export function PointerBeam() {
   const inSession = useXR((state) => state.session != null)
-  const right = useXRInputSourceState('controller', 'right')
-  const left = useXRInputSourceState('controller', 'left')
 
-  const latest = useRef({ inSession, right, left })
-  latest.current = { inSession, right, left }
+  const latest = useRef({ inSession })
+  latest.current = { inSession }
 
   const beams = useMemo(() => ({ left: makeBeam(), right: makeBeam() }), [])
   const scratch = useMemo(
@@ -67,13 +66,12 @@ export function PointerBeam() {
   // Per rendered frame, not per fixed step: a beam attached to a hand that lags the hand by
   // up to a frame is worse than no beam at all.
   useFrame(() => {
-    const { inSession: on, right: rightPad, left: leftPad } = latest.current
     // The teleport arc comes out of the same hand. Two lines from one controller saying
     // different things is not a pointer, it is a mess.
-    const hidden = !on || playerState.aiming
+    const hidden = !latest.current.inSession || playerState.aiming
 
-    draw(beams.right, hidden ? null : (rightPad ?? null), 'right', scratch)
-    draw(beams.left, hidden ? null : (leftPad ?? null), 'left', scratch)
+    draw(beams.right, hidden ? null : xrAim.right, 'right', scratch)
+    draw(beams.left, hidden ? null : xrAim.left, 'left', scratch)
   })
 
   return (
@@ -106,7 +104,7 @@ function makeBeam(): Beam {
 
 function draw(
   beam: Beam,
-  pad: XRControllerState | null,
+  aim: Object3D | null,
   handedness: 'left' | 'right',
   scratch: {
     origin: Vector3
@@ -116,15 +114,14 @@ function draw(
     active: Color
   },
 ): void {
-  const object = pad?.object
-  if (!object) {
+  if (!aim) {
     beam.line.visible = false
     return
   }
 
-  object.getWorldPosition(scratch.origin)
-  object.getWorldQuaternion(scratch.rotation)
-  // A controller points along its own -Z, the same axis the picker and the teleport arc use.
+  aim.getWorldPosition(scratch.origin)
+  aim.getWorldQuaternion(scratch.rotation)
+  // The target ray points along its own -Z, the same axis the picker and the arc use.
   scratch.direction.set(0, 0, -1).applyQuaternion(scratch.rotation)
 
   // Lit and extended only when *this* hand is the one holding a pointed focus. A hand that
