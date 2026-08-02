@@ -134,6 +134,10 @@ Enter VR and confirm, in order:
 9. **Room-scale** — physically walk a few steps without touching the stick. Your body should
    come with you: walk into a wall and the view fades out rather than letting you see
    through it, and it should come back as you step away.
+10. **The run loop** — the board by the door reads `Gold 100` and `Wave 1 awaits`. Open the
+    door, walk out through the doorway and back in: the wave clears, the board shows the
+    payout, and you are handed back to the foyer on the next wave with more gold. Reload the
+    page and both must still be there.
 
 ### Comfort
 
@@ -152,6 +156,19 @@ Room-scale walking is handled: the capsule follows your head, and the play space
 by the same amount so nothing moves the view. When the capsule can't follow — you have
 physically walked your head into a wall — the view fades out instead, because the only other
 options are moving the camera (forbidden) or letting you see through the level.
+
+### Saves
+
+Progression (gold, owned weapons, upgrades, wave number) persists to `localStorage` under
+`dcvr.save`, separately from settings under `dcvr.settings` — wiping one never wipes the
+other. To start over, in the browser console:
+
+```js
+__DCVR__.resetSave()
+```
+
+`__DCVR__` is dev-only. It also exposes `save`, `run`, `send(event)` and, until the shop
+lands in Sprint 1.3, `buyWeapon(id)`.
 
 ### Desktop VR emulator
 
@@ -194,6 +211,17 @@ the next VR entry.
   (`src/core/physics.tsx`), not from its own. Two accumulators both nominally at 60Hz drift
   in and out of phase, and a character controller querying a world that is sometimes half a
   step stale inherits that jitter into ground detection and every raycast downstream.
+- **`src/systems/save.ts` is pure, `game.ts` is a wrapper.** Gold, purchases, upgrades and
+  the loadout are plain functions over a plain `SaveData`, tested without a browser. The
+  store's only jobs are holding the current save and writing it to `localStorage`. An economy
+  bug fails silently in both directions — gold that vanishes and gold that multiplies look
+  identical from inside the game — so the rules live where they can be tested exhaustively.
+- **`src/systems/run.ts`** — the run state machine. `foyer → loading → wave → waveComplete →
+  foyer`, plus `wave → death → foyer`. Illegal transitions are refused and logged, which is
+  what stops a wave starting twice or a payout landing twice. The phase is deliberately not
+  persisted; the wave number is.
+- **Nothing is lost on death.** Progression is pure RPG: dying costs you the wave and nothing
+  else. There is a test asserting it.
 - **`src/systems/interaction.ts`** — one focus, picked once per step, shared by desktop and
   VR. Desktop looks at a thing and presses a key; VR points at it or reaches for it. The
   moment "what is the player addressing?" gets answered in two places, the two modes start
@@ -211,7 +239,7 @@ the next VR entry.
 ```
 src/
   core/      simulation loop, physics driver, XR store, debug hooks
-  systems/   input, locomotion, haptics, settings, player state
+  systems/   input, locomotion, haptics, settings, player state, save, run machine
   entities/  player rig, teleport, enemies, projectiles
   scenes/    foyer, dungeon, greybox
   ui/        diegetic panels, comfort vignette, VR entry, dev overlays
@@ -219,10 +247,15 @@ src/
 scripts/     smoke test
 ```
 
-The smoke test does more than check that something rendered. It walks the player across the
-foyer until the door offers itself, presses `Space`, and asserts that a wave started, that
-the player did *not* also jump, and that they can then walk through the doorway — then loads
-the greybox and walks them up the staircase and jumps, asserting they stay grounded and
-inside the level. A player sinking through the floor, strolling out through a wall, or
-getting a prompt for the wrong object renders a completely convincing room the whole way,
-which is exactly why a screenshot can't catch any of it.
+The smoke test does more than check that something rendered. It plays the game: it walks the
+player across the foyer until the door offers itself, presses `Space`, asserts that a wave
+started and that the player did *not* also jump, walks them out through the doorway and back
+in to clear the wave, checks the payout landed and the wave counter advanced, buys a weapon,
+then **reloads the page** and asserts the gold, the weapon and the wave number all came back.
+Finally it loads the greybox and runs the movement course — up the staircase and a standing
+jump, staying grounded and inside the level.
+
+Every one of those failures renders a completely convincing room the whole way. A player
+sinking through the floor, strolling out through a wall, getting a prompt for the wrong
+object, or losing every weapon they bought on reload all look perfect in a screenshot, which
+is exactly why the assertions are about state rather than pixels.

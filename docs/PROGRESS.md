@@ -7,14 +7,16 @@ sprint, before committing. The roadmap itself lives in [PLAN.md](PLAN.md).
 
 ## Current position
 
-> **Next up: Sprint 1.2 — Game state & persistence**
+> **Sprint 1.2 is built and green on desktop — awaiting the Quest 3 sign-off.**
 >
-> The game opens in a torch-lit foyer with a door that starts a wave, signed off on the
-> Quest 3. Room-scale walking works: you can walk a couple of metres physically, turn, and
-> keep moving with nothing feeling wrong. Epic 0's greybox is still at `?scene=greybox` as
-> the movement test rig.
+> The whole meta loop now runs: you start with 100 gold, open the door, a wave begins,
+> walking back into the foyer clears it and pays out, and all of it survives a reload. A
+> board by the door shows gold and what the run is doing. Next after sign-off is
+> **Sprint 1.3 — Shop & weapon dialog**, which puts a real panel on the counter and replaces
+> the dev-console purchase.
 >
-> There is still no *game state* — gold, weapons and the run itself are what 1.2 adds.
+> The wave itself is still a walk into an empty passage — there is no dungeon until 2.1 and
+> nothing to kill until 2.3.
 
 ---
 
@@ -26,8 +28,8 @@ sprint, before committing. The roadmap itself lives in [PLAN.md](PLAN.md).
 | | 0.2 WebXR on Quest 3 | ✅ Done |
 | | 0.3 Movement & physics | ✅ Done |
 | **1 — Foyer & Meta Loop** | 1.1 Foyer scene & interaction | ✅ Done |
-| | 1.2 Game state & persistence | ⬜ Next |
-| | 1.3 Shop & weapon dialog | ⬜ |
+| | 1.2 Game state & persistence | 🟨 Awaiting headset sign-off |
+| | 1.3 Shop & weapon dialog | ⬜ Next |
 | **2 — Wave Combat Core** | 2.1 Procedural dungeon generation | ⬜ |
 | | 2.2 Weapon & attack framework | ⬜ |
 | | 2.3 Enemies, AI & wave loop | ⬜ |
@@ -268,6 +270,72 @@ Decisions made during the sprint:
   layout is the brief for it.
 - Retired: `XRDiagnostics` now only mounts in the greybox, where it is still the fastest way
   to tell a dead thumbstick from broken locomotion.
+
+### 🟨 Sprint 1.2 — Game state & persistence
+
+**Verified on desktop:** typecheck clean · 212/212 unit tests · production build succeeds ·
+smoke test plays the whole loop — a fresh save with 100 gold, out through the door into the
+wave, back in to clear it, the payout landing, a weapon bought, then a real page reload with
+the gold, the weapon and the wave number all still there.
+
+**Awaiting a Quest 3 pass.** What to check, in the headset:
+
+1. The board by the door reads **Gold 100** and **Wave 1 awaits** from the spawn point.
+2. Open the door. The board should say the dungeon is stirring, then that you are in wave 1.
+3. Walk out through the doorway and back in. The wave clears, the board shows the payout,
+   and after a couple of seconds it hands you back to the foyer on **wave 2** with more gold.
+4. Reload the page in the headset browser. The gold and the wave number must both still be
+   there — that is the whole sprint.
+5. Do it twice more and watch the numbers keep rising rather than resetting.
+
+Delivered:
+
+- `src/systems/save.ts` — the save as pure functions: gold arithmetic, purchases, upgrades,
+  the loadout, and the sanitiser that has to survive whatever is actually in `localStorage`.
+  No React, no browser. 41 tests.
+- `src/systems/game.ts` — the persisted store, deliberately thin over those functions.
+- `src/systems/run.ts` — the run state machine (`foyer → loading → wave → waveComplete →
+  foyer`, plus `wave → death → foyer`), with illegal transitions refused and every legal one
+  logged.
+- `src/systems/RunDriver.tsx` — the placeholder that drives it until 2.3: a loading beat, and
+  "walk out and come back" standing in for clearing a wave.
+- `src/data/weapons.ts` — three weapon definitions with prices and upgrade tracks, which is
+  what the save validates against. The full roster of ten lands in 4.1.
+- `src/ui/StatusBoard.tsx` — gold and run state on a board by the door.
+- `src/test/setup.ts` — an in-memory `localStorage` for the test environment.
+
+Decisions made during the sprint:
+
+- **The economy is pure functions, and the store is a wrapper.** Gold that vanishes costs a
+  player their evening; gold that multiplies costs the game its progression. Both fail
+  silently. Every rule about what a transaction may do lives in `save.ts` and is tested at
+  that level — if a decision is being made in the store instead, it is in the wrong file and
+  cannot be tested without a browser.
+- **`merge` runs on a first launch too**, with nothing stored. Sanitising `undefined` there
+  handed every brand-new player a zeroed save instead of their 100 gold. Caught by a test,
+  and it would have been invisible in play — the only person affected is someone whose
+  storage is empty, which is never the developer.
+- **zustand's persist reaches through `window.localStorage`,** so it silently disables itself
+  in a node test environment: `persist` isn't even attached, and every "the save survives a
+  reload" test passes while proving nothing. The save now names its storage explicitly and
+  the test environment supplies one. This is the second time this middleware's quiet failure
+  mode has cost real time (see 0.3's `migrate`); it will not be the last.
+- **Nothing is lost on death.** `death` and `waveComplete` differ only in whether a payout
+  happened. There is a test asserting the save is untouched, specifically so a future
+  "drop your gold" idea has to be an argued change rather than an accident.
+- **The run phase is not persisted.** A restored mid-wave state would drop the player into a
+  dungeon that was never generated. Reloading always returns you to the foyer — but the
+  *wave number* comes from the save, or a returning player is greeted with a wave they
+  cleared an hour ago. Caught by the smoke test's reload check.
+- **A repeated `cleared` is refused rather than ignored quietly.** The stub clear condition
+  is a position check running sixty times a second, so a payout that fired on every matching
+  step is not hypothetical — it is what happens without the machine.
+- **The board exists because of 1.1's rule.** A state machine and a balance that only appear
+  in `console.info` are indistinguishable from nothing at all inside a headset. It is also a
+  rehearsal for the 1.3 shop panel, which is the same problem at ten times the size.
+- Known scaffolding, all of it with an owner: the loading pause and the walk-out-walk-back
+  clear condition belong to the Wave Director in 2.3; buying a weapon goes through the dev
+  console until the shop lands in 1.3.
 
 ---
 

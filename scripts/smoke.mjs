@@ -58,6 +58,12 @@ page.on('pageerror', (e) => consoleErrors.push(`pageerror: ${e.message}`))
 
 await page.goto(URL, { waitUntil: 'networkidle' })
 
+// Start from a first launch. The save persists across runs by design, so without this the
+// second smoke run inherits the first one's gold and the "you start with 100" assertion
+// becomes a test of last night's leftovers.
+await page.evaluate(() => window.localStorage.clear())
+await page.reload({ waitUntil: 'networkidle' })
+
 // R3F sizes the canvas and creates the context on its first frame.
 await page.waitForFunction(
   () => {
@@ -199,8 +205,29 @@ function readFocus() {
   return page.evaluate(() => window.__DCVR__?.focus ?? null)
 }
 
+function readRun() {
+  return page.evaluate(() => window.__DCVR__?.run ?? null)
+}
+
+/** The save, flattened — weapon ids rather than the whole ownership map. */
+function readSave() {
+  return page.evaluate(() => {
+    const save = window.__DCVR__?.save
+    return save
+      ? {
+          gold: save.gold,
+          wave: save.wave,
+          bestWave: save.bestWave,
+          weapons: Object.keys(save.weapons).sort(),
+          equipped: save.equipped,
+        }
+      : null
+  })
+}
+
 const foyer = {}
 foyer.spawn = await readPlayer()
+foyer.saveAtStart = await readSave()
 // From the spawn point, looking at the door — the view a player actually opens the game on.
 await page.screenshot({ path: `${OUT}/smoke-foyer.png` })
 
@@ -226,7 +253,35 @@ foyer.recentred = await walkUntil(['KeyD'], (p) => p.x > -0.15, 8)
 
 // Walk through the doorway. This is what proves the door's *collider* swung with it and not
 // just its mesh — a door that opens visually and still blocks you is a bug you cannot see.
-foyer.throughDoor = await walkUntil(['KeyW'], (p) => p.z < -6.4, 8)
+foyer.throughDoor = await walkUntil(['KeyW'], (p) => p.z < -6.8, 8)
+
+/**
+ * The rest of the run loop, which is Sprint 1.2's acceptance test.
+ *
+ * Out through the door is `loading` then `wave`; back into the foyer is the placeholder
+ * wave-clear, which pays out and advances the wave counter. Every one of these steps is
+ * invisible in a screenshot and consequential in the save file.
+ */
+await page.waitForFunction(() => window.__DCVR__?.run.phase === 'wave', { timeout: 8000 })
+foyer.runInDungeon = await readRun()
+
+// Back the way we came. Reaching the foyer clears the wave.
+foyer.backInside = await walkUntil(
+  ['KeyS'],
+  async () => (await readRun())?.phase !== 'wave',
+  10,
+)
+foyer.runOnClear = await readRun()
+
+// The end-of-wave state hands the player back to the shop on its own after a beat.
+await page.waitForFunction(() => window.__DCVR__?.run.phase === 'foyer', { timeout: 10000 })
+foyer.saveAfterWave = await readSave()
+
+// Spend some of it. There is no shop until Sprint 1.3, so this goes through the dev handle —
+// but what it buys is a real transaction against the real store, which is the thing that has
+// to still be there after a reload.
+foyer.purchase = await page.evaluate(() => window.__DCVR__?.buyWeapon('frostbrand-sword'))
+foyer.saveAfterPurchase = await readSave()
 
 /**
  * Now the greybox, for the movement course. It is the only room with a staircase, a ramp
@@ -237,6 +292,11 @@ await page.goto(`${URL}${URL.includes('?') ? '&' : '?'}scene=greybox`, {
 })
 await page.waitForFunction(() => window.__DCVR__?.player != null, { timeout: 15000 })
 await page.waitForTimeout(500)
+
+// That `goto` was a genuine page load, which makes it the reload half of Sprint 1.2's
+// acceptance test: gold and owned weapons have to come back out of localStorage.
+foyer.saveAfterReload = await readSave()
+foyer.runAfterReload = await readRun()
 
 const movement = {}
 movement.spawn = await readPlayer()
@@ -326,11 +386,72 @@ if (!foy.focus) {
   if (foy.focusAfter && foy.focusAfter.label !== 'Close the door') {
     failures.push(`door label did not flip after opening: ${foy.focusAfter.label}`)
   }
-  if (foy.throughDoor.z >= -6.4) {
+  if (foy.throughDoor.z >= -6.8) {
     failures.push(`could not walk through the opened door: z=${foy.throughDoor.z}`)
   }
   if (!foy.throughDoor.grounded || Math.abs(foy.throughDoor.y) > 0.15) {
     failures.push(`fell through the floor past the door: y=${foy.throughDoor.y}`)
+  }
+}
+
+// Sprint 1.2: the save, and the run machine that writes to it.
+if (!foy.saveAtStart) {
+  failures.push('no save on the debug handle — is the game store mounted?')
+} else {
+  if (foy.saveAtStart.gold !== 100) {
+    failures.push(`a new game should start with 100 gold, got ${foy.saveAtStart.gold}`)
+  }
+  if (!foy.saveAtStart.weapons.includes('emberwand')) {
+    failures.push('the player does not own the starter weapon')
+  }
+  if (foy.runInDungeon?.phase !== 'wave') {
+    failures.push(`never reached the wave phase: ${JSON.stringify(foy.runInDungeon)}`)
+  }
+  if (foy.runOnClear?.phase !== 'waveComplete') {
+    failures.push(`returning to the foyer did not clear the wave: ${foy.runOnClear?.phase}`)
+  }
+  // The payout, and the wave counter advancing. Both live in the save, so both are what a
+  // reload has to bring back.
+  if (!(foy.saveAfterWave.gold > foy.saveAtStart.gold)) {
+    failures.push(`clearing a wave paid nothing: ${foy.saveAtStart.gold} -> ${foy.saveAfterWave.gold}`)
+  }
+  if (foy.saveAfterWave.wave !== foy.saveAtStart.wave + 1) {
+    failures.push(`wave counter did not advance: ${foy.saveAfterWave.wave}`)
+  }
+  if (!foy.purchase?.ok) {
+    failures.push(`could not buy a weapon after the payout: ${JSON.stringify(foy.purchase)}`)
+  }
+  if (foy.saveAfterPurchase.gold >= foy.saveAfterWave.gold) {
+    failures.push('buying a weapon did not cost anything')
+  }
+
+  // The acceptance test for the sprint: none of the above may evaporate on reload.
+  if (!foy.saveAfterReload) {
+    failures.push('no save after reload')
+  } else {
+    if (foy.saveAfterReload.gold !== foy.saveAfterPurchase.gold) {
+      failures.push(
+        `gold did not survive the reload: ${foy.saveAfterPurchase.gold} -> ${foy.saveAfterReload.gold}`,
+      )
+    }
+    if (!foy.saveAfterReload.weapons.includes('frostbrand-sword')) {
+      failures.push('the purchased weapon did not survive the reload')
+    }
+    if (foy.saveAfterReload.wave !== foy.saveAfterWave.wave) {
+      failures.push(`wave progress did not survive the reload: ${foy.saveAfterReload.wave}`)
+    }
+    // The phase deliberately does *not* persist — a restored mid-wave state would drop the
+    // player into a dungeon that no longer exists.
+    if (foy.runAfterReload?.phase !== 'foyer') {
+      failures.push(`reload should return to the foyer, got ${foy.runAfterReload?.phase}`)
+    }
+    // ...but it must pick the *wave* back up from the save, or the status board greets a
+    // returning player with a wave they cleared an hour ago.
+    if (foy.runAfterReload?.wave !== foy.saveAfterReload.wave) {
+      failures.push(
+        `run resumed on the wrong wave: run ${foy.runAfterReload?.wave}, save ${foy.saveAfterReload.wave}`,
+      )
+    }
   }
 }
 

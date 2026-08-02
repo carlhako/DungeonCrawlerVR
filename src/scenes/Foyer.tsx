@@ -6,6 +6,7 @@ import { useFixedUpdate } from '@/core/simulation'
 import { Door } from '@/entities/Door'
 import { registerInteractable, type Interactable } from '@/systems/interaction'
 import { flicker } from '@/systems/torch'
+import { StatusBoard } from '@/ui/StatusBoard'
 
 /**
  * The foyer: the lit, safe room the player starts and returns to.
@@ -97,6 +98,10 @@ export function Foyer() {
       {/* Hinged at the left edge of the gap, swinging into the dark. */}
       <Door position={[DOORWAY_X - DOOR_GAP / 2 + 0.1, 0, -halfD]} />
       <Vestibule />
+
+      {/* Beside the doorway, deliberately: it is the last thing you read on the way out and
+          the first on the way back, which is exactly when the numbers on it change. */}
+      <StatusBoard position={[1.6, 1.75, -halfD + 0.18]} />
 
       <Torches />
       <ShopCounter />

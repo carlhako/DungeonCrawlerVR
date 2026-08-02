@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite'
+import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 import basicSsl from '@vitejs/plugin-basic-ssl'
 import { fileURLToPath } from 'node:url'
@@ -19,6 +19,12 @@ export default defineConfig(({ mode }) => ({
     // Vite blocks unrecognised Host headers by default; LAN IPs are fine for a dev server
     // on a trusted network and this avoids a confusing "Blocked request" page.
     allowedHosts: true,
+  },
+  test: {
+    // No jsdom: nearly everything tested here is pure maths. The setup file supplies the one
+    // browser API the tests genuinely need — a `localStorage` for the persisted stores, so
+    // "the save survives a reload" is a real assertion rather than a silent no-op.
+    setupFiles: ['./src/test/setup.ts'],
   },
   build: {
     target: 'es2022',
