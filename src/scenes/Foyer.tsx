@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { CuboidCollider, RigidBody } from '@react-three/rapier'
-import type { PointLight } from 'three'
+import type { Mesh, MeshStandardMaterial, PointLight } from 'three'
 import { SystemOrder } from '@/core/loop'
 import { useFixedUpdate } from '@/core/simulation'
 import { Door } from '@/entities/Door'
@@ -236,6 +236,15 @@ function Torch({ position, seed }: { position: [number, number, number]; seed: n
   )
 }
 
+const BELL_GLOW_IDLE = 0.3
+const BELL_RING_SECONDS = 1.1
+
+/** Emissive is on the material, and the material is shared by nothing else here. */
+function setBellGlow(mesh: Mesh, intensity: number): void {
+  const material = mesh.material as MeshStandardMaterial
+  material.emissiveIntensity = intensity
+}
+
 /**
  * The shop counter. Furniture for now — Sprint 1.3 puts the weapon dialog on it.
  *
@@ -244,6 +253,17 @@ function Torch({ position, seed }: { position: [number, number, number]; seed: n
  */
 function ShopCounter() {
   const position = useMemo<[number, number, number]>(() => [3.4, 0, 3.2], [])
+  const bellMesh = useRef<Mesh>(null)
+
+  /**
+   * Seconds since the bell was last struck, or null.
+   *
+   * It needs to *visibly* do something. A console line is no answer at all in a headset —
+   * the player presses the thing, nothing moves, and the reasonable conclusion is that the
+   * game is broken. Audio would be the real answer and arrives in Sprint 3.2; until then it
+   * rocks and glows, which is enough to say "yes, that worked, there is just nobody home".
+   */
+  const struck = useRef<number | null>(null)
 
   const bell = useMemo<Interactable>(
     () => ({
@@ -252,10 +272,35 @@ function ShopCounter() {
       radius: 0.16,
       label: 'Ring the bell',
       enabled: true,
-      onActivate: () => console.info('The shopkeeper is out. Weapons arrive in Sprint 1.3.'),
+      onActivate: () => {
+        struck.current = 0
+        console.info('The shopkeeper is out. Weapons arrive in Sprint 1.3.')
+      },
     }),
     [position],
   )
+
+  useFixedUpdate((dt) => {
+    const mesh = bellMesh.current
+    if (!mesh || struck.current === null) return
+
+    struck.current += dt
+    const t = struck.current
+    if (t > BELL_RING_SECONDS) {
+      struck.current = null
+      mesh.rotation.z = 0
+      mesh.position.y = 1.02
+      setBellGlow(mesh, BELL_GLOW_IDLE)
+      return
+    }
+
+    // A decaying wobble, as if it had been knocked. Fast enough to read as a strike rather
+    // than as the bell wandering off on its own.
+    const decay = 1 - t / BELL_RING_SECONDS
+    mesh.rotation.z = Math.sin(t * 34) * 0.28 * decay * decay
+    mesh.position.y = 1.02 + Math.abs(Math.sin(t * 34)) * 0.012 * decay
+    setBellGlow(mesh, BELL_GLOW_IDLE + 2.2 * decay * decay)
+  }, SystemOrder.Effects)
 
   useEffect(() => registerInteractable(bell), [bell])
 
@@ -267,12 +312,12 @@ function ShopCounter() {
           <meshStandardMaterial color={WOOD} roughness={0.85} />
         </mesh>
       </RigidBody>
-      <mesh position={[-0.5, 1.02, -0.35]} castShadow>
+      <mesh ref={bellMesh} position={[-0.5, 1.02, -0.35]} castShadow>
         <sphereGeometry args={[0.08, 12, 10]} />
         <meshStandardMaterial
           color="#7a6230"
           emissive="#c98a3a"
-          emissiveIntensity={0.3}
+          emissiveIntensity={BELL_GLOW_IDLE}
           metalness={0.8}
           roughness={0.35}
         />

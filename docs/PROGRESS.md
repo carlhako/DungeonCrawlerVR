@@ -9,12 +9,12 @@ sprint, before committing. The roadmap itself lives in [PLAN.md](PLAN.md).
 
 > **Next up: Sprint 1.2 — Game state & persistence**
 >
-> Sprint 1.1 is built and verified on desktop, but **awaiting VR sign-off on the Quest 3** —
-> pointing at a handle, reaching for it, and room-scale walking are all things a monitor
-> cannot judge. See the checklist in the sprint log below.
+> The game opens in a torch-lit foyer with a door that starts a wave, signed off on the
+> Quest 3. Room-scale walking works: you can walk a couple of metres physically, turn, and
+> keep moving with nothing feeling wrong. Epic 0's greybox is still at `?scene=greybox` as
+> the movement test rig.
 >
-> The game now opens in a torch-lit foyer with a door that starts a wave. Epic 0's greybox
-> is still at `?scene=greybox` as the movement test rig.
+> There is still no *game state* — gold, weapons and the run itself are what 1.2 adds.
 
 ---
 
@@ -25,7 +25,7 @@ sprint, before committing. The roadmap itself lives in [PLAN.md](PLAN.md).
 | **0 — Foundation & VR Bootstrap** | 0.1 Project scaffold | ✅ Done |
 | | 0.2 WebXR on Quest 3 | ✅ Done |
 | | 0.3 Movement & physics | ✅ Done |
-| **1 — Foyer & Meta Loop** | 1.1 Foyer scene & interaction | 🟡 Awaiting headset sign-off |
+| **1 — Foyer & Meta Loop** | 1.1 Foyer scene & interaction | ✅ Done |
 | | 1.2 Game state & persistence | ⬜ Next |
 | | 1.3 Shop & weapon dialog | ⬜ |
 | **2 — Wave Combat Core** | 2.1 Procedural dungeon generation | ⬜ |
@@ -201,28 +201,21 @@ Decisions made during the sprint:
   Sprint 1.1. Likely resolution is contextual — activate when a prompt is showing, otherwise
   jump.
 
-### 🟡 Sprint 1.1 — Foyer scene & interaction
+### ✅ Sprint 1.1 — Foyer scene & interaction
 
 **Verified on desktop:** typecheck clean · 153/153 unit tests · production build succeeds ·
 smoke test walks the acceptance test end to end — across the foyer until the door offers
 itself, `Space` to open it, a wave started, no accidental jump, and out through the doorway —
 then loads the greybox and re-runs the whole Sprint 0.3 movement course.
 
-**Awaiting VR sign-off.** In the headset, check:
+**Verified on a Quest 3 (2026-08-03):** the door can be opened and walked through into the
+dark, and room-scale holds up — physically walking a couple of metres, then turning and
+moving on, felt natural with nothing moving the view.
 
-1. **Point** — aim the right controller at the door handle from across the room. The prompt
-   should appear, name the trigger, and open the door when you pull it.
-2. **Reach** — walk up and put your hand on the handle instead. The prompt should switch to
-   naming the grip, and the door should open to either trigger or grip.
-3. **The right thing** — stand next to the shop bell while pointing at the door. What your
-   hand is on wins; it must never address the far object.
-4. **Room-scale** — physically walk a few steps with the stick untouched. Your body comes
-   with you (walk to a wall and you are stopped by it, not by an invisible box back at the
-   spawn point), and nothing moves your view while it happens.
-5. **Blocked head** — deliberately walk your head into a wall. The view should fade out
-   rather than let you see through the level, and come back as you step away.
-6. **Turning while offset** — walk a couple of metres to one side of where you started, then
-   turn. The turn should still be centred on you, not swing you around an arc.
+One thing found in the headset: the shop bell did nothing observable. It only wrote to the
+console, which is invisible in VR, so pressing it was indistinguishable from a broken
+interaction. It now rocks and glows when struck. The rule this hands to every later
+interactable: **feedback has to exist in the world, or it does not exist.**
 
 Delivered:
 
@@ -264,6 +257,10 @@ Decisions made during the sprint:
 - **A blocked head fades the view even at `comfortVignette: 0`.** That setting is a statement
   about motion sickness, not a request to see the inside of the walls. There is no third
   option: the alternative is moving the camera.
+- **An interaction with no world-space feedback reads as a bug.** The bell logged to the
+  console, which does not exist in a headset. Every interactable from here needs a visible
+  or felt response on activation — the haptic click is not enough on its own, and audio
+  doesn't arrive until Sprint 3.2.
 - **The foyer is bright, on purpose.** It is the one room that is meant to feel safe, and the
   dungeon's darkness is worth nothing without it. A dim foyer costs the dungeon its impact.
 - Known gap: the foyer is built from primitives at real scale, not from an art kit. No CC0
