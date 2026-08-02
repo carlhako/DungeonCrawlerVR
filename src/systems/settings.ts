@@ -108,8 +108,28 @@ interface SettingsStore extends Settings {
 
 const STORAGE_KEY = 'dcvr.settings'
 
-/** Bumped whenever the stored shape changes. v1 was the two XR render knobs; v2 adds movement. */
-export const SETTINGS_VERSION = 2
+/**
+ * Bumped whenever the stored shape changes **or a default changes in a way that has to
+ * reach players who never touched the setting.**
+ *
+ * v1 — the two XR render knobs. v2 — movement and comfort. v3 — smooth turning by default.
+ */
+export const SETTINGS_VERSION = 3
+
+/**
+ * Settings whose stored value is discarded when migrating from before `[version]`, because
+ * the value in storage was a default nobody chose rather than a decision worth keeping.
+ *
+ * This exists because `partialize` writes every key, so a stored blob cannot distinguish
+ * "the player picked snap" from "snap happened to be the default the day this was written".
+ * Changing a default therefore has no effect on anyone who has already run the game — the
+ * stored value shadows it, silently and with nothing in the console.
+ */
+const RESET_ON_MIGRATION: ReadonlyArray<{ key: keyof Settings; version: number }> = [
+  // v2 shipped `turn: 'snap'` as the default. v3 makes it smooth, and every existing store
+  // has to follow — the whole point of the change is that it reaches the person playing.
+  { key: 'turn', version: 3 },
+]
 
 /**
  * Carry settings forward from an older stored version.
@@ -120,12 +140,19 @@ export const SETTINGS_VERSION = 2
  * foveation and framebuffer scale someone dialled in against the frame HUD quietly revert,
  * and the only symptom is that the game feels worse than it did yesterday.
  *
- * Every migration so far is additive, and `sanitiseSettings` already keeps recognised keys
- * and fills the rest from defaults — so it *is* the migration. Anything that renames or
- * rescales a key needs a real per-version branch here.
+ * Migrations so far are additive, and `sanitiseSettings` already keeps recognised keys and
+ * fills the rest from defaults — so it *is* the migration for shape changes. What it can't
+ * do on its own is *un*-keep a value, which is what `RESET_ON_MIGRATION` is for. Anything
+ * that renames or rescales a key needs a real per-version branch here.
  */
-export function migrateSettings(persisted: unknown, _version: number): Settings {
-  return sanitiseSettings(persisted)
+export function migrateSettings(persisted: unknown, version: number): Settings {
+  const settings = sanitiseSettings(persisted)
+  for (const { key, version: introduced } of RESET_ON_MIGRATION) {
+    if (version < introduced) {
+      settings[key] = DEFAULT_SETTINGS[key] as never
+    }
+  }
+  return settings
 }
 
 export const useSettings = create<SettingsStore>()(
@@ -203,8 +230,11 @@ export function readStoredSettings(): Settings {
   try {
     const raw = globalThis.localStorage?.getItem(STORAGE_KEY)
     if (!raw) return { ...DEFAULT_SETTINGS }
-    const parsed = JSON.parse(raw) as { state?: unknown }
-    return sanitiseSettings(parsed.state)
+    const parsed = JSON.parse(raw) as { state?: unknown; version?: unknown }
+    // Same migration the store applies on hydration. This runs *before* React mounts, so
+    // skipping it would have the pre-mount read and the store disagreeing for one session.
+    const version = typeof parsed.version === 'number' ? parsed.version : 0
+    return migrateSettings(parsed.state, version)
   } catch {
     return { ...DEFAULT_SETTINGS }
   }

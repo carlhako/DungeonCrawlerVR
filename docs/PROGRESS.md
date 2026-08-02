@@ -173,6 +173,14 @@ Decisions made during the sprint:
   the whole stored blob on a version bump — so adding a movement setting silently reset the
   foveation and framebuffer scale tuned on-device in 0.2. The symptom is that the game just
   feels worse than it did yesterday, with nothing in the console.
+- **Changing a default reaches nobody who has already played.** `partialize` persists every
+  key, so a stored blob can't tell "the player chose snap" from "snap was the default the
+  day this was written" — and the stored value shadows the new default forever. Caught in
+  the headset: turning was still snapped after the default changed. Fixed with a version
+  bump plus a `RESET_ON_MIGRATION` list naming the settings whose stored value to drop.
+  **Every future default change needs the same treatment**, or it only applies to players
+  with empty storage. The durable alternative — persisting only keys the player has actually
+  touched — is worth doing before the settings screen lands in 4.4.
 - **Yaw lives on a group inside the rigid body**, not on the body. A capsule is rotationally
   symmetric, so pushing rotation through the physics pipeline buys nothing.
 - **The vignette is a dome, not a plane.** A plane close enough to fill the view has stereo

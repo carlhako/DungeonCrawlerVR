@@ -86,6 +86,26 @@ describe('migrateSettings', () => {
     expect(migrated.moveSpeed).toBe(DEFAULT_SETTINGS.moveSpeed)
   })
 
+  it('resets turn to the new default for a store written before v3', () => {
+    // The bug this test exists for: v2 shipped `turn: 'snap'` as the default and persisted
+    // every key, so changing the default in code did nothing on any device that had already
+    // run the game. Turning stayed snapped, with nothing to see in the console.
+    const v2 = { framebufferScale: 0.8, turn: 'snap' as const, moveSpeed: 4 }
+    const migrated = migrateSettings(v2, 2)
+
+    expect(migrated.turn).toBe(DEFAULT_SETTINGS.turn)
+    // Only the setting we deliberately reset — everything else the player tuned survives.
+    expect(migrated.framebufferScale).toBe(0.8)
+    expect(migrated.moveSpeed).toBe(4)
+  })
+
+  it('keeps a turn mode chosen at v3 or later', () => {
+    // Once the default is smooth, picking snap is a real choice and must not be undone by
+    // the next version bump.
+    expect(migrateSettings({ turn: 'snap' }, 3).turn).toBe('snap')
+    expect(migrateSettings({ turn: 'snap' }, 4).turn).toBe('snap')
+  })
+
   it('produces a complete, valid Settings from any version', () => {
     for (const version of [0, 1, 99]) {
       expect(Object.keys(migrateSettings({}, version)).sort()).toEqual(
