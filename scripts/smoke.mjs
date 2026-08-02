@@ -142,9 +142,74 @@ const info = await page.evaluate(async (sampleMs) => {
   }
 }, SAMPLE_MS)
 
+/**
+ * Walk the player around and check the character controller actually resolves collisions.
+ *
+ * This is the part a screenshot can't answer. A player falling slowly through the floor, or
+ * strolling out through a wall, renders a completely convincing room the whole way — the
+ * scene looks perfect and the game is broken.
+ *
+ * Pointer lock isn't available headless, so movement is driven by keyboard alone and the
+ * player's heading stays at its default (facing -Z, into the room).
+ */
+function readPlayer() {
+  return page.evaluate(() => {
+    const p = window.__DCVR__?.player
+    return p
+      ? {
+          x: +p.position.x.toFixed(3),
+          y: +p.position.y.toFixed(3),
+          z: +p.position.z.toFixed(3),
+          grounded: p.grounded,
+        }
+      : null
+  })
+}
+
+/**
+ * Hold keys until the player reaches a condition, or give up.
+ *
+ * Position-based rather than "hold W for four seconds": headless Chromium renders through
+ * SwiftShader at wildly variable speed, so a fixed duration covers a different distance on
+ * every run. Timed walks quietly stopped short of the staircase and the test then failed
+ * for a reason that had nothing to do with the code.
+ */
+async function walkUntil(keys, done, maxSeconds = 15) {
+  for (const key of keys) await page.keyboard.down(key)
+  let player = await readPlayer()
+  const deadline = Date.now() + maxSeconds * 1000
+  while (Date.now() < deadline && !done(player)) {
+    await page.waitForTimeout(100)
+    player = await readPlayer()
+  }
+  for (const key of keys) await page.keyboard.up(key)
+  return player
+}
+
+const movement = {}
+movement.spawn = await readPlayer()
+
+// Left along the open back of the room, lining up with the staircase. The stairs are a
+// solid block, so they have to be approached from the front — walking into their side is
+// just walking into a 1.08m wall.
+movement.toStairs = await walkUntil(['KeyA'], (p) => p.x <= -5)
+// Up: six 0.18m risers, every one inside the 0.4m autostep limit, so the player should walk
+// up without jumping.
+movement.upStairs = await walkUntil(['KeyW'], (p) => p.y > 1)
+
+// A jump from standing. Tapped, not held — the press has to survive being shorter than a
+// single fixed step, which is exactly the input the naive polling implementation dropped.
+await page.keyboard.press('Space')
+await page.waitForTimeout(150)
+movement.midJump = await readPlayer()
+await page.waitForTimeout(1500)
+movement.landed = await readPlayer()
+
 mkdirSync(OUT, { recursive: true })
 await page.screenshot({ path: `${OUT}/smoke.png` })
 await browser.close()
+
+info.movement = movement
 
 const results = { ...info, consoleErrors }
 console.log(JSON.stringify(results, null, 2))
@@ -173,6 +238,49 @@ if (!info.xr.entryRendered) failures.push('VR entry UI never rendered')
 if (info.xr.entryState !== 'unavailable') {
   failures.push(`VR entry should be unavailable headless, got: ${info.xr.entryState}`)
 }
+const move = info.movement
+if (!move.spawn) failures.push('player state missing — is the rig mounted?')
+else {
+  // The capsule spawns centred at 0.85m and should settle with its feet on the floor.
+  // Anything far from 0 means it either sank through the slab or is hovering above it.
+  if (Math.abs(move.spawn.y) > 0.1) {
+    failures.push(`player did not settle on the floor: y=${move.spawn.y}`)
+  }
+  if (!move.spawn.grounded) failures.push('player is not grounded at the spawn point')
+
+  // Strafing works at all — otherwise every check below passes for the wrong reason.
+  if (move.toStairs.x > move.spawn.x - 3) {
+    failures.push(`strafing did not move the player: x=${move.toStairs.x}`)
+  }
+  if (!move.toStairs.grounded || Math.abs(move.toStairs.y) > 0.1) {
+    failures.push(`player left the floor crossing flat ground: y=${move.toStairs.y}`)
+  }
+
+  // Autostep: six risers inside the limit should carry the player up without a jump. This
+  // is the fragile one — the min-width setting silently wedges the player halfway up.
+  if (move.upStairs.y < 0.8) {
+    failures.push(`player did not climb the stairs: y=${move.upStairs.y}`)
+  }
+  if (!move.upStairs.grounded) {
+    failures.push('player is airborne at the top of the stairs')
+  }
+
+  // A tapped jump has to register even when the press is shorter than one fixed step.
+  if (move.midJump.y <= move.upStairs.y + 0.1) {
+    failures.push(`jump did not lift the player: y=${move.midJump.y}`)
+  }
+  if (move.midJump.grounded) failures.push('player still grounded mid-jump')
+  if (!move.landed.grounded) failures.push('player never landed after jumping')
+  // Walls sit at ±8 and the floor at 0. Outside that box, the player has left the level —
+  // the failure a screenshot of a perfectly good-looking room will never show you.
+  for (const [label, sample] of Object.entries(move)) {
+    if (!sample) continue
+    if (Math.abs(sample.x) > 8 || Math.abs(sample.z) > 8 || sample.y < -0.5) {
+      failures.push(`player left the level at ${label}: ${JSON.stringify(sample)}`)
+    }
+  }
+}
+
 if (consoleErrors.length) failures.push(`console errors: ${consoleErrors.join(' | ')}`)
 
 if (failures.length) {

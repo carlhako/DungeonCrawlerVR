@@ -1,18 +1,328 @@
-import { XROrigin } from '@react-three/xr'
+import { useEffect, useMemo, useRef } from 'react'
+import { useFrame, useThree } from '@react-three/fiber'
+import { XROrigin, useXR } from '@react-three/xr'
+import {
+  CapsuleCollider,
+  RigidBody,
+  useRapier,
+  type RapierRigidBody,
+} from '@react-three/rapier'
+import type { Collider, KinematicCharacterController } from '@dimforge/rapier3d-compat'
+import { Euler, Group, Matrix4, Vector3 } from 'three'
+import { SystemOrder } from '@/core/loop'
+import { useFixedUpdate } from '@/core/simulation'
+import { SPRINT_MULTIPLIER, desktopInput } from '@/systems/desktopInput'
+import {
+  MAX_TELEPORT_SLOPE_DEGREES,
+  applyDeadzone,
+  createTurnLatch,
+  headingFromBasis,
+  integrateVertical,
+  moveDirection,
+  smoothTurn,
+  snapTurn,
+} from '@/systems/locomotion'
+import {
+  DESKTOP_EYE_HEIGHT,
+  PLAYER_CENTRE_OFFSET,
+  PLAYER_HALF_HEIGHT,
+  PLAYER_RADIUS,
+  PLAYER_SPAWN,
+  playerCollider,
+  playerState,
+} from '@/systems/player'
+import { useSettings, type Settings } from '@/systems/settings'
+import { xrInput } from '@/systems/xrInput'
+import { consumeTeleport } from '@/entities/Teleport'
 
 /**
- * The player's position in the world.
+ * The player: a kinematic capsule driven by Rapier's character controller, carrying the XR
+ * origin in VR and the camera on desktop.
  *
- * `XROrigin` marks where the player's **feet** are — head height comes from the headset's
- * own floor-relative tracking, never from us. Setting a camera Y here would double-count
- * it and leave the player floating.
- *
- * In Sprint 0.3 the character controller drives this group's position; for now it is a
- * fixed spawn point so the greybox can be inspected at true scale.
+ * The rule this file exists to enforce: **nothing here moves the VR camera except the
+ * player's own head.** The rig moves; the head moves freely within it. Turning is the one
+ * deliberate exception, and it defaults to snap precisely so there is no rotation to be
+ * nauseated by.
  */
 
-export const PLAYER_SPAWN: [number, number, number] = [0, 0, 4]
+const STICK_DEADZONE = 0.15
+const DEG = Math.PI / 180
+
+/** Character controller tuning. Distances in metres. */
+const CONTROLLER = {
+  /** Gap kept between the capsule and the world. Too small and contacts jitter. */
+  offset: 0.02,
+  /** Ledges up to this high are stepped over rather than walked into. */
+  autostepHeight: 0.4,
+  /**
+   * Clear space that must exist *beyond the capsule's leading edge* after a step, before
+   * the step is taken at all.
+   *
+   * The upper bound is therefore the tread depth minus the capsule radius, not the tread
+   * depth — which is much tighter than it looks. On the greybox's 0.35m treads a 0.3m
+   * capsule leaves 0.05m, and anything above that wedges the player halfway up the stairs
+   * with no indication why. Verified by walking it: 0.05 climbs, 0.1 sticks on step four.
+   *
+   * The rule this hands to the dungeon tile kit in Sprint 2.1: treads want to be at least
+   * `PLAYER_RADIUS + this` deep, so 0.35m is the shallowest stair we support.
+   */
+  autostepMinWidth: 0.05,
+  /** Keeps the player on the floor walking downhill instead of skipping off each edge. */
+  snapToGround: 0.3,
+  /** Matched to the teleport marker's limit: a slope you can walk up, you can teleport to. */
+  maxSlopeClimbDegrees: MAX_TELEPORT_SLOPE_DEGREES,
+  /** Must exceed the climb angle, or the player slides back down slopes they can walk up. */
+  minSlopeSlideDegrees: MAX_TELEPORT_SLOPE_DEGREES + 5,
+} as const
 
 export function PlayerRig() {
-  return <XROrigin position={PLAYER_SPAWN} />
+  const body = useRef<RapierRigidBody>(null)
+  const collider = useRef<Collider>(null)
+  // Yaw lives on a group inside the body rather than on the body itself. Rotating a
+  // kinematic rigid body would push the rotation through the physics pipeline for no gain,
+  // since a capsule is rotationally symmetric anyway.
+  const yawGroup = useRef<Group>(null)
+
+  // Published so world queries can exclude the player — the teleport arc starts inside this
+  // capsule, and weapon raycasts (Sprint 2.2) would otherwise shoot the player in the chest.
+  useEffect(() => {
+    playerCollider.current = collider.current
+    return () => {
+      playerCollider.current = null
+    }
+  }, [])
+
+  return (
+    <RigidBody
+      ref={body}
+      type="kinematicPosition"
+      colliders={false}
+      position={[PLAYER_SPAWN[0], PLAYER_SPAWN[1] + PLAYER_CENTRE_OFFSET, PLAYER_SPAWN[2]]}
+      enabledRotations={[false, false, false]}
+    >
+      <CapsuleCollider ref={collider} args={[PLAYER_HALF_HEIGHT, PLAYER_RADIUS]} />
+
+      {/* Dropped back down to the player's feet: XROrigin marks the floor they stand on,
+          while the rigid body's origin is the centre of the capsule. Head height comes from
+          the headset's own floor-relative tracking and is never set here. */}
+      <group ref={yawGroup} position={[0, -PLAYER_CENTRE_OFFSET, 0]}>
+        <XROrigin />
+      </group>
+
+      <CharacterController body={body} collider={collider} yawGroup={yawGroup} />
+    </RigidBody>
+  )
+}
+
+interface ControllerProps {
+  body: React.RefObject<RapierRigidBody | null>
+  collider: React.RefObject<Collider | null>
+  yawGroup: React.RefObject<Group | null>
+}
+
+function CharacterController({ body, collider, yawGroup }: ControllerProps) {
+  const { world } = useRapier()
+  const gl = useThree((state) => state.gl)
+  const camera = useThree((state) => state.camera)
+  const inSession = useXR((state) => state.session != null)
+  const settings = useSettings()
+
+  /**
+   * Rapier's kinematic character controller resolves the movement we *ask* for into the
+   * movement that is actually possible — sliding along walls, climbing steps, stopping at
+   * slopes — rather than us hand-rolling collision response and getting it subtly wrong.
+   *
+   * Created inside the effect that destroys it, and reached through a ref, so its lifetime
+   * is owned in exactly one place. Building it in a `useMemo` instead looks tidier and is
+   * a trap: `removeCharacterController` calls into WASM to free the thing, StrictMode runs
+   * the mount/cleanup pair twice, and the memo does *not* re-run in between — leaving every
+   * later step calling through a freed pointer.
+   */
+  const controller = useRef<KinematicCharacterController | null>(null)
+
+  useEffect(() => {
+    const created = world.createCharacterController(CONTROLLER.offset)
+    created.setUp({ x: 0, y: 1, z: 0 })
+    created.setSlideEnabled(true)
+    created.enableAutostep(CONTROLLER.autostepHeight, CONTROLLER.autostepMinWidth, true)
+    created.enableSnapToGround(CONTROLLER.snapToGround)
+    created.setMaxSlopeClimbAngle(CONTROLLER.maxSlopeClimbDegrees * DEG)
+    created.setMinSlopeSlideAngle(CONTROLLER.minSlopeSlideDegrees * DEG)
+    // Walking into a crate should shove it. Costs nothing until there are dynamic bodies to
+    // shove, and means props don't feel nailed down once there are.
+    created.setApplyImpulsesToDynamicBodies(true)
+    controller.current = created
+
+    return () => {
+      controller.current = null
+      world.removeCharacterController(created)
+    }
+  }, [world])
+
+  // Read inside the fixed loop through a ref, so changing a setting doesn't tear down and
+  // re-register the system mid-stride.
+  const latest = useRef({ settings, inSession })
+  latest.current = { settings, inSession }
+
+  // Allocated once. Nothing in the fixed loop is allowed to allocate.
+  const scratch = useMemo(
+    () => ({
+      vertical: { velocity: 0 },
+      turnLatch: createTurnLatch(),
+      headMatrix: new Matrix4(),
+      forward: new Vector3(),
+      up: new Vector3(),
+      desired: { x: 0, y: 0, z: 0 },
+      euler: new Euler(0, 0, 0, 'YXZ'),
+    }),
+    [],
+  )
+
+  useFixedUpdate(
+    (dt) => {
+      const rigidBody = body.current
+      const capsule = collider.current
+      const yawNode = yawGroup.current
+      const character = controller.current
+      if (!rigidBody || !capsule || !yawNode || !character) return
+
+      const { settings: config, inSession: inVR } = latest.current
+
+      const turned = inVR ? vrTurn(scratch.turnLatch, config, dt) : 0
+      if (turned !== 0) yawNode.rotation.y += turned
+
+      // In VR the rig's yaw is the player's heading; on desktop the rig never rotates and
+      // the mouse owns the heading, driving the camera directly.
+      playerState.yaw = inVR ? yawNode.rotation.y : desktopInput.yaw
+
+      const teleporting = inVR && config.locomotion === 'teleport'
+
+      // Head-relative in VR: you walk where you look. The heading already includes the
+      // rig's yaw, because it is read from a world matrix.
+      const facing = inVR ? headHeading(gl, camera, scratch) : desktopInput.yaw
+      const stick = inVR
+        ? applyDeadzone(xrInput.left.thumbstick.x, xrInput.left.thumbstick.y, STICK_DEADZONE)
+        : desktopInput.move
+
+      // Teleport mode replaces stick translation outright. Leaving both live would give the
+      // player two ways to move and a clear model of neither.
+      const move = teleporting ? { x: 0, y: 0 } : moveDirection(stick, facing)
+      const speed =
+        config.moveSpeed * (!inVR && desktopInput.sprint ? SPRINT_MULTIPLIER : 1)
+      const jump = inVR ? xrInput.right.primary.justPressed : desktopInput.jump.justPressed
+
+      scratch.desired.x = move.x * speed * dt
+      scratch.desired.z = move.y * speed * dt
+      scratch.desired.y = integrateVertical(
+        scratch.vertical,
+        playerState.grounded,
+        jump && !teleporting,
+        dt,
+      )
+
+      character.computeColliderMovement(capsule, scratch.desired)
+      const corrected = character.computedMovement()
+      const grounded = character.computedGrounded()
+
+      // Blocked on the way up means a ceiling. Keeping the velocity would pin the player
+      // against it for the rest of the jump.
+      if (scratch.vertical.velocity > 0 && corrected.y < scratch.desired.y - 1e-4) {
+        scratch.vertical.velocity = 0
+      }
+
+      const current = rigidBody.translation()
+      let nextX = current.x + corrected.x
+      let nextY = current.y + corrected.y
+      let nextZ = current.z + corrected.z
+
+      // A completed teleport is an absolute move, not a translation to be resolved — the
+      // whole point is that it skips the space in between.
+      const landing = teleporting ? consumeTeleport() : null
+      if (landing) {
+        nextX = landing.x
+        nextY = landing.y + PLAYER_CENTRE_OFFSET
+        nextZ = landing.z
+        scratch.vertical.velocity = 0
+      }
+
+      rigidBody.setNextKinematicTranslation({ x: nextX, y: nextY, z: nextZ })
+
+      playerState.position.x = nextX
+      playerState.position.y = nextY - PLAYER_CENTRE_OFFSET
+      playerState.position.z = nextZ
+      playerState.grounded = grounded
+      // Actual speed, not requested: walking into a wall should not close the comfort
+      // vignette, because the view isn't moving.
+      playerState.speed = landing ? 0 : Math.hypot(corrected.x, corrected.z) / dt
+      playerState.turning = inVR && config.turn === 'smooth' && turned !== 0
+    },
+    SystemOrder.Player,
+    [],
+  )
+
+  /**
+   * The desktop camera, placed per rendered frame rather than per fixed step: it is
+   * presentation, and running it at the display rate is what keeps mouselook smooth.
+   *
+   * Inside a session this does nothing at all. The headset owns the camera, and writing to
+   * it behind the runtime's back is precisely what the comfort rule forbids.
+   */
+  useFrame(() => {
+    if (latest.current.inSession) return
+    const rigidBody = body.current
+    if (!rigidBody) return
+
+    const centre = rigidBody.translation()
+    camera.position.set(
+      centre.x,
+      centre.y - PLAYER_CENTRE_OFFSET + DESKTOP_EYE_HEIGHT,
+      centre.z,
+    )
+    // YXZ so yaw is applied before pitch and the horizon never rolls.
+    scratch.euler.set(desktopInput.pitch, desktopInput.yaw, 0)
+    camera.quaternion.setFromEuler(scratch.euler)
+  })
+
+  return null
+}
+
+/** Snap or smooth turn from the right thumbstick. Returns the yaw delta in radians. */
+function vrTurn(
+  latch: ReturnType<typeof createTurnLatch>,
+  settings: Settings,
+  dt: number,
+): number {
+  const stickX = xrInput.right.thumbstick.x
+  if (settings.turn === 'smooth') {
+    if (Math.abs(stickX) < STICK_DEADZONE) return 0
+    return smoothTurn(stickX, settings.smoothTurnSpeed * DEG, dt)
+  }
+  return snapTurn(latch, stickX, settings.snapTurnDegrees * DEG)
+}
+
+interface HeadScratch {
+  headMatrix: Matrix4
+  forward: Vector3
+  up: Vector3
+}
+
+/**
+ * The world-space yaw the player's head is facing.
+ *
+ * Reads `gl.xr.getCamera()` rather than the R3F camera while presenting: three updates the
+ * XR camera from the frame's pose at the top of the animation callback, before any of our
+ * systems run, so this is the current frame's head rather than the previous frame's.
+ */
+function headHeading(
+  gl: { xr: { isPresenting: boolean; getCamera: () => { matrixWorld: Matrix4 } } },
+  fallback: { matrixWorld: Matrix4 },
+  scratch: HeadScratch,
+): number {
+  const head = gl.xr.isPresenting ? gl.xr.getCamera() : fallback
+  scratch.headMatrix.copy(head.matrixWorld)
+  const e = scratch.headMatrix.elements
+  // Columns 1 and 2 of the rotation basis: +Y is up, -Z is forward.
+  scratch.up.set(e[4], e[5], e[6])
+  scratch.forward.set(-e[8], -e[9], -e[10])
+  return headingFromBasis(scratch.forward, scratch.up)
 }

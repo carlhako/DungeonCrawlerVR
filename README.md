@@ -40,10 +40,34 @@ testing — but **VR needs HTTPS**, so use `npm run dev:xr` for the headset (see
 | `npm run smoke` | Headless render check against a running dev server |
 | `npm run typecheck` | Typecheck only |
 
+### Desktop controls
+
+Click the canvas to capture the mouse — pointer lock needs a user gesture, so mouselook is
+inert until you do. `Esc` releases it.
+
+| Input | Action |
+| --- | --- |
+| `W` `A` `S` `D` / arrows | Move |
+| Mouse | Look |
+| `Shift` | Sprint |
+| `Space` | Jump |
+
+### VR controls
+
+| Input | Action |
+| --- | --- |
+| Left thumbstick | Move (smooth mode) / aim the teleport arc (teleport mode) |
+| Right thumbstick | Turn — snap by default, smooth optional |
+| Right controller | Points the teleport arc |
+| `A` | Jump (smooth mode only) |
+
+Locomotion mode, turn style, speed and vignette strength all live in the F2 panel under
+**Movement**, and persist. See "Comfort" below.
+
 ### Dev keys
 
 - `F1` — frame/perf HUD
-- `F2` — live tuning panel
+- `F2` — live tuning panel (Movement, XR render, Lighting, Physics)
 
 ## Testing on the Quest 3
 
@@ -85,8 +109,31 @@ Enter VR and confirm, in order:
    and push the thumbstick (the dot follows it). The bar at the top of each column is lit
    while that controller is tracked.
 4. **Haptics** — each trigger pull buzzes *that* controller, not both.
-5. **Comfort** — nothing moves your view except your own head. Report anything that doesn't
-   hold; this is a hard rule, not a preference.
+5. **Comfort** — nothing moves your view except your own head, other than the turn you
+   asked for. Report anything that doesn't hold; this is a hard rule, not a preference.
+6. **Movement** — walk with the left stick; you should go where you are *looking*, not
+   where the controller points. Snap-turn once per flick of the right stick, never a spin
+   while it's held. Walk up the stairs and the ramp without jumping; walk into the walls and
+   the 0.7m ledge and stop dead. Nothing should let you leave the room.
+7. **Teleport** — switch `locomotion` to `teleport` in the F2 panel *before* entering VR.
+   Hold the left stick forward to aim from the right controller; the arc turns green on
+   valid floor and red on walls, ceilings and steep slopes. Release to move.
+
+### Comfort
+
+The comfort settings are not cosmetic — smooth locomotion makes a meaningful number of
+people ill, and nothing in this game will ever *require* it. Set these from the F2 panel
+before entering VR; they persist.
+
+- **`locomotion`** — `smooth` (default) or `teleport`.
+- **`turn`** — `snap` (default, 30°) or `smooth`. Snap is the single most effective comfort
+  measure in VR; smooth turning is the most nauseating thing a VR game can do.
+- **`comfortVignette`** — how far the field of view narrows while you are being moved by
+  something other than your own legs. 0 disables it.
+
+Known gap: the player capsule does not yet follow the headset when you physically walk
+around your room, so in a small play space you can put your head through a wall. It needs
+real level geometry to tune against and lands in Sprint 1.1.
 
 ### Desktop VR emulator
 
@@ -122,16 +169,31 @@ the next VR entry.
   behave identically at 72, 90 and 120fps.
 - **`src/systems/haptics.ts`** — haptics carry the weight screenshake carries on a flat
   screen, without moving the camera. Every impact and cast routes through here.
+- **`src/systems/locomotion.ts`** — the movement maths, free of three.js and Rapier so it
+  can be unit-tested. Deadzones, the snap-turn latch, gravity, the teleport arc. VR movement
+  bugs are miserable to diagnose with a headset on and trivial to reproduce here.
+- **One physics clock.** Rapier is mounted `paused` and stepped from our fixed loop
+  (`src/core/physics.tsx`), not from its own. Two accumulators both nominally at 60Hz drift
+  in and out of phase, and a character controller querying a world that is sometimes half a
+  step stale inherits that jitter into ground detection and every raycast downstream.
+- **Player state is a plain singleton** (`src/systems/player.ts`), like `xrInput`. The
+  vignette reads it every frame; enemy aggro and the scare director will read it sixty times
+  a second. None of that should re-render the scene graph.
 
 ## Layout
 
 ```
 src/
-  core/      simulation loop, XR store, debug hooks
-  systems/   input, haptics, settings, cross-cutting gameplay systems
-  entities/  player rig, enemies, projectiles
+  core/      simulation loop, physics driver, XR store, debug hooks
+  systems/   input, locomotion, haptics, settings, player state
+  entities/  player rig, teleport, enemies, projectiles
   scenes/    foyer, dungeon, greybox
-  ui/        diegetic panels, VR entry, dev overlays
+  ui/        diegetic panels, comfort vignette, VR entry, dev overlays
   data/      weapon / enemy / wave definitions
 scripts/     smoke test
 ```
+
+The smoke test does more than check that something rendered: it walks the player up the
+greybox staircase and jumps, asserting they stay grounded and inside the level. A player
+sinking through the floor or strolling out through a wall renders a completely convincing
+room the whole way, which is exactly why a screenshot can't catch it.

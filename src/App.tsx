@@ -1,22 +1,30 @@
 import { Canvas } from '@react-three/fiber'
 import { Suspense } from 'react'
 import { ACESFilmicToneMapping } from 'three'
-import { XR, useXR } from '@react-three/xr'
+import { XR } from '@react-three/xr'
+import { Physics } from '@react-three/rapier'
+import { FIXED_STEP } from '@/core/loop'
 import { SimulationDriver } from '@/core/simulation'
+import { PhysicsDriver } from '@/core/physics'
 import { xrStore } from '@/core/xr'
 import { GreyboxRoom } from '@/scenes/GreyboxRoom'
 import { XRDiagnostics } from '@/scenes/XRDiagnostics'
 import { PlayerRig } from '@/entities/PlayerRig'
+import { TeleportAim } from '@/entities/Teleport'
+import { ComfortVignette } from '@/ui/ComfortVignette'
+import { DesktopInputSampler } from '@/systems/DesktopInputSampler'
 import { XRInputSampler, XRRenderSettings } from '@/systems/XRInputSampler'
 import {
   DevPanel,
   DevPerf,
+  MovementControls,
   XRSettingsControls,
   useDevToggles,
   useLightingControls,
+  usePhysicsDebug,
 } from '@/ui/DevOverlay'
 import { VRButton } from '@/ui/VRButton'
-import { OrbitControls } from '@react-three/drei'
+import { DesktopHint } from '@/ui/DesktopHint'
 
 function SceneLighting() {
   const { ambient, keyIntensity, keyHeight } = useLightingControls()
@@ -38,17 +46,28 @@ function SceneLighting() {
   )
 }
 
-/**
- * Placeholder camera control until the character controller lands in Sprint 0.3.
- *
- * Unmounted inside a session: in XR the camera belongs to the headset, and orbit controls
- * would be writing to it every frame behind the runtime's back. That is exactly the class
- * of bug the comfort rule exists to prevent.
- */
-function DesktopCameraControls() {
-  const inSession = useXR((state) => state.session != null)
-  if (inSession) return null
-  return <OrbitControls target={[0, 1.2, 0]} maxPolarAngle={Math.PI * 0.49} />
+/** Everything that needs a physics world, kept together so the ordering is visible. */
+function World() {
+  const debug = usePhysicsDebug()
+
+  return (
+    <Physics
+      // Mounted paused and stepped from the fixed loop instead. See PhysicsDriver.
+      paused
+      timeStep={FIXED_STEP}
+      debug={debug}
+    >
+      <PhysicsDriver />
+      <SceneLighting />
+      <GreyboxRoom />
+      <PlayerRig />
+      <TeleportAim />
+      {/* Sprint 0.2 scaffolding, kept because it is still how you tell "the stick is dead"
+          apart from "locomotion is broken" while wearing a headset. Retires in Sprint 1.1
+          when the foyer lands. No collider — you walk straight through it. */}
+      <XRDiagnostics />
+    </Physics>
+  )
 }
 
 export function App() {
@@ -65,11 +84,12 @@ export function App() {
           gl.toneMapping = ACESFilmicToneMapping
           gl.toneMappingExposure = 1.0
         }}
-        camera={{ position: [0, 1.7, 8], fov: 70, near: 0.05, far: 100 }}
+        camera={{ position: [0, 1.6, 4], fov: 70, near: 0.05, far: 100 }}
       >
         <XR store={xrStore}>
           <SimulationDriver />
           <XRInputSampler />
+          <DesktopInputSampler />
           <XRRenderSettings />
 
           <color attach="background" args={['#0b0b10']} />
@@ -78,24 +98,24 @@ export function App() {
           <fog attach="fog" args={['#0b0b10', 20, 70]} />
 
           <Suspense fallback={null}>
-            <SceneLighting />
-            <GreyboxRoom />
-            <XRDiagnostics />
-            <PlayerRig />
+            <World />
           </Suspense>
 
-          <DesktopCameraControls />
+          {/* Outside <Physics>: it follows the head, not a rigid body. */}
+          <ComfortVignette />
           <DevPerf visible={showPerf} />
         </XR>
       </Canvas>
 
       <VRButton />
       <DevPanel visible={showPanel} />
-      {import.meta.env.DEV && <XRSettingsControls />}
-      <div className="hint">
-        Sprint 0.2 — WebXR bring-up · drag to orbit
-        {import.meta.env.DEV && <> · F1 perf · F2 tuning</>}
-      </div>
+      {import.meta.env.DEV && (
+        <>
+          <XRSettingsControls />
+          <MovementControls />
+        </>
+      )}
+      <DesktopHint />
     </>
   )
 }

@@ -99,3 +99,9 @@ canvas {
   pointer-events: none;
   white-space: nowrap;
 }
+
+/* Dimmer once the player is actually playing — the control legend is a reminder at that
+   point, not an instruction. */
+.hint--locked {
+  color: rgba(217, 207, 187, 0.25);
+}

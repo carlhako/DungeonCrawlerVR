@@ -1,4 +1,5 @@
 import { gameLoop } from './loop'
+import { playerState, type PlayerState } from '@/systems/player'
 
 /**
  * Dev-only handle onto the running game, hung off `window.__DCVR__`.
@@ -15,6 +16,15 @@ export interface DebugHandle {
   readonly simTime: number
   /** Fixed steps run in the most recent frame. */
   readonly lastStepCount: number
+  /**
+   * Live player position, grounding and speed.
+   *
+   * Exposed so the smoke test can assert the things a screenshot cannot: that the player is
+   * standing on the floor rather than falling through it, and that walking into a wall
+   * actually stops them. Those are the two failure modes of a character controller that
+   * still renders a perfectly convincing room.
+   */
+  readonly player: PlayerState
 }
 
 export function installDebugHandle(): void {
@@ -26,6 +36,9 @@ export function installDebugHandle(): void {
     },
     get lastStepCount() {
       return gameLoop.lastStepCount
+    },
+    get player() {
+      return playerState
     },
   }
   ;(window as unknown as { __DCVR__: DebugHandle }).__DCVR__ = handle

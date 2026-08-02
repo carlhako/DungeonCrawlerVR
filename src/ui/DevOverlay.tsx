@@ -1,7 +1,13 @@
 import { Perf } from 'r3f-perf'
 import { Leva, useControls } from 'leva'
 import { useEffect, useState } from 'react'
-import { SETTING_LIMITS, useSettings } from '@/systems/settings'
+import {
+  SETTING_LIMITS,
+  SETTING_OPTIONS,
+  useSettings,
+  type LocomotionMode,
+  type TurnMode,
+} from '@/systems/settings'
 
 /**
  * Development instrumentation: the frame HUD and the live tuning panel.
@@ -81,6 +87,77 @@ export function XRSettingsControls() {
   )
 
   return null
+}
+
+/**
+ * Locomotion and comfort, wired to the persisted settings store.
+ *
+ * These need setting *before* entering VR for the same reason as the render knobs: leva is
+ * DOM and disappears the moment the headset takes over. The real in-world settings panel
+ * arrives in Sprint 4.4 — until then, this is how a comfort mode gets changed, and the
+ * values persist so the choice survives the reload.
+ */
+export function MovementControls() {
+  const set = useSettings((state) => state.set)
+  const settings = useSettings()
+
+  useControls(
+    'Movement',
+    () => ({
+      locomotion: {
+        value: settings.locomotion,
+        options: [...SETTING_OPTIONS.locomotion],
+        onChange: (value: LocomotionMode) => set('locomotion', value),
+      },
+      turn: {
+        value: settings.turn,
+        options: [...SETTING_OPTIONS.turn],
+        onChange: (value: TurnMode) => set('turn', value),
+      },
+      snapTurnDegrees: {
+        value: settings.snapTurnDegrees,
+        ...SETTING_LIMITS.snapTurnDegrees,
+        onChange: (value: number) => set('snapTurnDegrees', value),
+      },
+      smoothTurnSpeed: {
+        value: settings.smoothTurnSpeed,
+        ...SETTING_LIMITS.smoothTurnSpeed,
+        onChange: (value: number) => set('smoothTurnSpeed', value),
+      },
+      moveSpeed: {
+        value: settings.moveSpeed,
+        ...SETTING_LIMITS.moveSpeed,
+        onChange: (value: number) => set('moveSpeed', value),
+      },
+      comfortVignette: {
+        value: settings.comfortVignette,
+        ...SETTING_LIMITS.comfortVignette,
+        onChange: (value: number) => set('comfortVignette', value),
+      },
+    }),
+    { collapsed: true },
+    // As with the XR panel: leva owns the widget state once mounted, and rebuilding it on
+    // every change would fight the slider mid-drag.
+    [set],
+  )
+
+  return null
+}
+
+/**
+ * Rapier's collider wireframes.
+ *
+ * The single most useful debugging tool this sprint: when the player is standing on
+ * nothing, catching on nothing, or falling through a floor that is visibly there, this
+ * shows the difference between what is drawn and what is actually collided with.
+ */
+export function usePhysicsDebug(): boolean {
+  const { colliders } = useControls(
+    'Physics',
+    { colliders: { value: false, label: 'show colliders' } },
+    { collapsed: true },
+  )
+  return import.meta.env.DEV && colliders
 }
 
 /** Scene-lighting knobs, so the greybox can be dialled in without a rebuild. */
