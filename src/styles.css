@@ -1,0 +1,48 @@
+:root {
+  --void: #07070a;
+  --ember: #ff8a3d;
+  --parchment: #d9cfbb;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--void);
+}
+
+body {
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  color: var(--parchment);
+  /* The game is a fullscreen 3D surface — browser text selection and iOS/Android
+     double-tap zoom only ever get in the way of dragging and clicking in the scene. */
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+  overscroll-behavior: none;
+}
+
+canvas {
+  display: block;
+  outline: none;
+}
+
+.hint {
+  position: fixed;
+  bottom: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  color: rgba(217, 207, 187, 0.45);
+  pointer-events: none;
+  white-space: nowrap;
+}
