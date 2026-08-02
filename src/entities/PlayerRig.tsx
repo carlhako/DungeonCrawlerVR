@@ -41,8 +41,8 @@ import { consumeTeleport } from '@/entities/Teleport'
  *
  * The rule this file exists to enforce: **nothing here moves the VR camera except the
  * player's own head.** The rig moves; the head moves freely within it. Turning is the one
- * deliberate exception, and it defaults to snap precisely so there is no rotation to be
- * nauseated by.
+ * deliberate exception — and the one to reach for first if anyone reports nausea, since
+ * snap turning removes the rotation entirely.
  */
 
 const STICK_DEADZONE = 0.15

@@ -3,6 +3,7 @@ import {
   DEFAULT_SETTINGS,
   SETTING_LIMITS,
   SETTING_OPTIONS,
+  migrateSettings,
   sanitiseSettings,
 } from './settings'
 
@@ -68,6 +69,34 @@ describe('sanitiseSettings', () => {
   it('ignores unknown keys from a future build', () => {
     const result = sanitiseSettings({ foveation: 0.5, turboMode: true })
     expect(Object.keys(result).sort()).toEqual(Object.keys(DEFAULT_SETTINGS).sort())
+  })
+})
+
+describe('migrateSettings', () => {
+  it('keeps what a v1 store had and fills in what it did not', () => {
+    // The real case: a Quest with foveation and framebuffer scale tuned against the frame
+    // HUD in Sprint 0.2, loading a build that added movement settings. Without a migrate,
+    // zustand discards the whole blob and that tuning silently reverts.
+    const v1 = { framebufferScale: 0.8, foveation: 0.35 }
+    const migrated = migrateSettings(v1, 1)
+
+    expect(migrated.framebufferScale).toBe(0.8)
+    expect(migrated.foveation).toBe(0.35)
+    expect(migrated.turn).toBe(DEFAULT_SETTINGS.turn)
+    expect(migrated.moveSpeed).toBe(DEFAULT_SETTINGS.moveSpeed)
+  })
+
+  it('produces a complete, valid Settings from any version', () => {
+    for (const version of [0, 1, 99]) {
+      expect(Object.keys(migrateSettings({}, version)).sort()).toEqual(
+        Object.keys(DEFAULT_SETTINGS).sort(),
+      )
+    }
+  })
+
+  it('survives a corrupt stored blob', () => {
+    expect(migrateSettings(null, 1)).toEqual(DEFAULT_SETTINGS)
+    expect(migrateSettings('nonsense', 1)).toEqual(DEFAULT_SETTINGS)
   })
 })
 

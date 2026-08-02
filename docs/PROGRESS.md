@@ -130,7 +130,9 @@ assessed on a monitor. In the headset, check:
 
 1. **Smooth locomotion** — the left stick moves you where you are *looking*, not where the
    controller points. No drift when the stick is centred.
-2. **Snap turn** — one turn per flick of the right stick. Holding it must not spin you.
+2. **Turning** — smooth by default (Carl's call, 2026-08-02); the right stick
+   should rotate you at a steady, readable rate. Then switch `turn` to `snap` in the F2
+   panel and confirm one turn per flick, never a spin while the stick is held.
 3. **Comfort vignette** — closes as you move, opens as you stop, and never appears while
    you are standing still or turning your head.
 4. **Teleport** — switch `locomotion` to `teleport` in the F2 panel before entering VR.
@@ -162,6 +164,15 @@ Decisions made during the sprint:
   both nominally at 60Hz drift in and out of phase, and a character controller querying a
   world that is sometimes half a step stale inherits that jitter into ground detection and
   every raycast downstream.
+- **Smooth turning is the default**, at Carl's request, overriding the usual convention.
+  Snap is the single most effective anti-nausea measure in VR, so it stays the first thing
+  to reach for if anyone reports discomfort — but it is a preference, and the person playing
+  it gets to set it. Both modes are wired, validated and persisted, so the settings screen
+  in Sprint 4.4 is UI over an interface that already exists.
+- **`migrate` is not optional on a versioned persist store.** Without one, zustand discards
+  the whole stored blob on a version bump — so adding a movement setting silently reset the
+  foveation and framebuffer scale tuned on-device in 0.2. The symptom is that the game just
+  feels worse than it did yesterday, with nothing in the console.
 - **Yaw lives on a group inside the rigid body**, not on the body. A capsule is rotationally
   symmetric, so pushing rotation through the physics pipeline buys nothing.
 - **The vignette is a dome, not a plane.** A plane close enough to fill the view has stereo

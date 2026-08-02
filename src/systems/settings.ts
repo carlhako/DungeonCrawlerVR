@@ -66,9 +66,13 @@ export const DEFAULT_SETTINGS: Settings = {
   // while facing it, which teleport cannot express. Teleport is one setting away for
   // players who need it.
   locomotion: 'smooth',
-  // Snap by default: it is the single most effective comfort measure in VR, and 30° is the
-  // usual sweet spot — large enough to be worth doing, small enough to stay oriented.
-  turn: 'snap',
+  // Smooth turning, by preference, at a rate slow enough to stay readable.
+  //
+  // Worth being explicit that this is the *less* comfortable default: snap turning is the
+  // single most effective anti-nausea measure in VR, which is why nearly everything ships
+  // with it on. Snap is one setting away, and remains the first thing to reach for if
+  // anyone reports discomfort.
+  turn: 'smooth',
   snapTurnDegrees: 30,
   smoothTurnSpeed: 120,
   // A brisk walk. Faster reads as skating and makes vection much worse.
@@ -104,6 +108,26 @@ interface SettingsStore extends Settings {
 
 const STORAGE_KEY = 'dcvr.settings'
 
+/** Bumped whenever the stored shape changes. v1 was the two XR render knobs; v2 adds movement. */
+export const SETTINGS_VERSION = 2
+
+/**
+ * Carry settings forward from an older stored version.
+ *
+ * This function existing at all is the point. Without a `migrate`, zustand's persist
+ * middleware **discards the entire stored blob** on a version bump — so adding one setting
+ * silently resets every setting the player had already tuned. On a headset that means the
+ * foveation and framebuffer scale someone dialled in against the frame HUD quietly revert,
+ * and the only symptom is that the game feels worse than it did yesterday.
+ *
+ * Every migration so far is additive, and `sanitiseSettings` already keeps recognised keys
+ * and fills the rest from defaults — so it *is* the migration. Anything that renames or
+ * rescales a key needs a real per-version branch here.
+ */
+export function migrateSettings(persisted: unknown, _version: number): Settings {
+  return sanitiseSettings(persisted)
+}
+
 export const useSettings = create<SettingsStore>()(
   persist(
     (set) => ({
@@ -113,10 +137,11 @@ export const useSettings = create<SettingsStore>()(
     }),
     {
       name: STORAGE_KEY,
-      version: 2,
+      version: SETTINGS_VERSION,
       // Persist only the data, never the actions. Routing it through `sanitiseSettings`
       // means adding a setting is a one-line change here rather than two.
       partialize: (state): Settings => sanitiseSettings(state),
+      migrate: migrateSettings,
       // A stored blob from an older build may be missing keys we've since added, or hold
       // values from a range we've since narrowed. Merge over the defaults and clamp, so a
       // stale localStorage entry can never produce an unrenderable session.

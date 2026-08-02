@@ -57,7 +57,7 @@ inert until you do. `Esc` releases it.
 | Input | Action |
 | --- | --- |
 | Left thumbstick | Move (smooth mode) / aim the teleport arc (teleport mode) |
-| Right thumbstick | Turn — snap by default, smooth optional |
+| Right thumbstick | Turn — smooth by default, snap optional |
 | Right controller | Points the teleport arc |
 | `A` | Jump (smooth mode only) |
 
@@ -112,9 +112,10 @@ Enter VR and confirm, in order:
 5. **Comfort** — nothing moves your view except your own head, other than the turn you
    asked for. Report anything that doesn't hold; this is a hard rule, not a preference.
 6. **Movement** — walk with the left stick; you should go where you are *looking*, not
-   where the controller points. Snap-turn once per flick of the right stick, never a spin
-   while it's held. Walk up the stairs and the ramp without jumping; walk into the walls and
-   the 0.7m ledge and stop dead. Nothing should let you leave the room.
+   where the controller points. The right stick turns you smoothly, and the vignette should
+   close while it does. Walk up the stairs and the ramp without jumping; walk into the walls
+   and the 0.7m ledge and stop dead. Nothing should let you leave the room.
+   Then switch `turn` to `snap` and check it fires once per flick, never a spin while held.
 7. **Teleport** — switch `locomotion` to `teleport` in the F2 panel *before* entering VR.
    Hold the left stick forward to aim from the right controller; the arc turns green on
    valid floor and red on walls, ceilings and steep slopes. Release to move.
@@ -126,8 +127,9 @@ people ill, and nothing in this game will ever *require* it. Set these from the 
 before entering VR; they persist.
 
 - **`locomotion`** — `smooth` (default) or `teleport`.
-- **`turn`** — `snap` (default, 30°) or `smooth`. Snap is the single most effective comfort
-  measure in VR; smooth turning is the most nauseating thing a VR game can do.
+- **`turn`** — `smooth` (default) or `snap` (30°). Note this is the *less* comfortable
+  default: snap turning is the single most effective anti-nausea measure in VR, which is why
+  nearly everything ships with it on. **If anyone reports discomfort, switch to snap first.**
 - **`comfortVignette`** — how far the field of view narrows while you are being moved by
   something other than your own legs. 0 disables it.
 
