@@ -7,7 +7,8 @@ sprint, before committing. The roadmap itself lives in [PLAN.md](PLAN.md).
 
 ## Current position
 
-> **Sprint 1.3 is built and green on desktop — awaiting the Quest 3 sign-off.**
+> **Sprint 1.3 is built; the first Quest 3 pass found two defects in the shop, both now
+> fixed — awaiting a second headset pass.**
 >
 > Epic 1 is now complete end to end: start with 100 gold, buy and equip a weapon at a board
 > on the shop counter, open the door, clear a wave, come back richer and spend it. All of it
@@ -28,7 +29,7 @@ sprint, before committing. The roadmap itself lives in [PLAN.md](PLAN.md).
 | | 0.3 Movement & physics | ✅ Done |
 | **1 — Foyer & Meta Loop** | 1.1 Foyer scene & interaction | ✅ Done |
 | | 1.2 Game state & persistence | ✅ Done |
-| | 1.3 Shop & weapon dialog | 🟨 Awaiting headset sign-off |
+| | 1.3 Shop & weapon dialog | 🟨 Headset defects fixed — awaiting re-test |
 | **2 — Wave Combat Core** | 2.1 Procedural dungeon generation | ⬜ Next |
 | | 2.2 Weapon & attack framework | ⬜ |
 | | 2.3 Enemies, AI & wave loop | ⬜ |
@@ -331,7 +332,40 @@ Decisions made during the sprint:
 
 ### 🟨 Sprint 1.3 — Shop & weapon dialog
 
-**Verified on desktop:** typecheck clean · 235/235 unit tests · production build succeeds ·
+**Headset pass 1 (2026-08-03) — two defects, both fixed.** Reported: "you have to touch the
+board to trigger the buttons, you can't just stand back a little and point"; and "I touch a
+button with my hand but it highlights the button below."
+
+One root cause: **buttons are flat rectangles and the picker only understood spheres.**
+
+- An upgrade row is drawn 45cm × 7cm. Its inscribed sphere is 4cm across, so pointing needed
+  ~1.5° of accuracy at 1.5m — on a button 45cm wide. Pointing read as broken.
+- Near-grab reach was `radius + 12cm` = 16cm, across rows 8cm apart. Four rows were in reach
+  at once and the nearest *centre* won. The controller's reported pose sits in the palm,
+  behind and below the fingertip, so the winner was reliably the row below.
+
+Fixed by giving `Interactable` an optional `surface` — a rectangle in world space — that both
+pickers test against directly: a ray-plane intersection with a bounds check, and a hand test
+that is generous perpendicular to the board (6cm either side) and exact in-plane. The pickable
+target is now the drawn target, and a hand over the gap between two buttons picks neither,
+which is the honest answer.
+
+Three more things came out of it:
+
+- **A visible pointer beam** (`src/ui/PointerBeam.tsx`). Aiming at something with nothing
+  drawn to aim *with* is guesswork — you cannot correct an aim you cannot see. A dim 55cm stub
+  from each controller, stretching to the target and lighting amber when it has one. Hidden
+  while the teleport arc is up: two lines out of one hand saying different things is a mess.
+- **Both hands point now**, not just the right. Which hand you point with is handedness, not
+  something the game gets an opinion on.
+- **The trigger that confirms is the one on the hand that found the focus**, so pointing with
+  one hand is no longer confirmed by a trigger pull on the other.
+
+Covered by seven new tests built on the real board geometry (`interaction.test.ts`, "flat
+buttons on a panel") and by a new smoke step that stands 1.8m back and aims 15cm off the
+centre of a button — an ordinary way to use a board, and a certain miss before this.
+
+**Verified on desktop:** typecheck clean · 242/242 unit tests · production build succeeds ·
 smoke test buys and equips a weapon *through the panel* — walking to the counter, aiming at
 each button, pressing the key — including a purchase it cannot afford, then reloading the
 page and finding the gold, the weapon, the loadout and the wave number all still there.
@@ -339,10 +373,12 @@ page and finding the gold, the weapon, the loadout and the wave number all still
 **Awaiting a Quest 3 pass.** What to check, in the headset:
 
 1. Walk to the counter. The board reads your gold, the three weapons and what you own.
-2. **Point** at a weapon row with the controller and pull the trigger; the row you are aimed
-   at should highlight, and only that one.
-3. **Reach out** and press a button with your hand instead. Same result, and the button
-   under your hand must win over whatever the ray is crossing.
+2. **Stand back a step and point** at a weapon row, with either hand, and pull the trigger.
+   The beam should reach the row you are aimed at, that row alone should highlight, and
+   aiming anywhere along it — not just at its centre — should work.
+3. **Reach out** and press a button with your hand instead. The button under your hand must
+   win over whatever the ray is crossing — and it must be the button you are touching, not
+   its neighbour. Try the row directly above and below the one you want, deliberately.
 4. Buy something you can afford, then put it in each hand in turn.
 5. Try to buy something you cannot afford. The refusal must say why, on the board.
 6. Reload the page. Everything you bought and equipped is still there.
@@ -356,7 +392,9 @@ Delivered:
   registered at the world position of each rectangle.
 - `src/data/weapons.ts` — base stats and the upgrade effects, so the shop's "12 → 14" reads
   from the same table Sprint 2.2 will fire from.
-- `src/systems/interaction.ts` — a `proximity` opt-out, and a corrected focus precedence.
+- `src/systems/interaction.ts` — a `proximity` opt-out, a corrected focus precedence, and
+  rectangular (`surface`) picking for anything flat.
+- `src/ui/PointerBeam.tsx` — the line out of each controller that shows where you are aiming.
 
 Decisions made during the sprint:
 

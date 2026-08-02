@@ -146,6 +146,76 @@ describe('pickByProximity', () => {
   })
 })
 
+describe('flat buttons on a panel', () => {
+  /**
+   * The shop board, to scale. A panel facing +Z, with upgrade rows 44.6cm wide and 7.2cm
+   * tall stacked 8.3cm apart — the geometry that made the shop unusable in a headset when
+   * every button was picked as the sphere inscribed in it.
+   */
+  const HALF_W = 0.223
+  const HALF_H = 0.036
+  const PITCH = 0.083
+
+  function row(id: string, y: number) {
+    return make(id, [0, y, 0], {
+      radius: HALF_H,
+      proximity: false,
+      surface: {
+        right: { x: 1, y: 0, z: 0 },
+        up: { x: 0, y: 1, z: 0 },
+        normal: { x: 0, y: 0, z: 1 },
+        halfWidth: HALF_W,
+        halfHeight: HALF_H,
+        depth: 0.06,
+      },
+    })
+  }
+
+  const middle = row('upgrade-damage', 1.4)
+  const below = row('upgrade-rate', 1.4 - PITCH)
+  const above = row('upgrade-crit', 1.4 + PITCH)
+  const panel = [above, middle, below]
+
+  /** The player stands in front of the board, at +z, looking back at it. */
+  const AT_BOARD = { x: 0, y: 0, z: -1 }
+
+  it('is hit anywhere along its width, not just at its centre', () => {
+    // The bug: the inscribed sphere was 4cm across on a button drawn 45cm wide, so aiming at
+    // the middle of a button you could plainly see missed it.
+    const pick = pickByRay(panel, { x: 0.2, y: 1.4, z: 1 }, AT_BOARD)
+    expect(pick?.item).toBe(middle)
+    expect(pick?.distance).toBeCloseTo(1)
+  })
+
+  it('is not hit past its edge', () => {
+    expect(pickByRay(panel, { x: HALF_W + 0.02, y: 1.4, z: 1 }, AT_BOARD)).toBeNull()
+  })
+
+  it('is not hit through the gap between two rows', () => {
+    expect(pickByRay(panel, { x: 0, y: 1.4 - PITCH / 2, z: 1 }, AT_BOARD)).toBeNull()
+  })
+
+  it('cannot be pointed at through the back of the panel', () => {
+    expect(pickByRay(panel, { x: 0, y: 1.4, z: -1 }, { x: 0, y: 0, z: 1 })).toBeNull()
+  })
+
+  it('is touched by a hand in front of it, and not by its neighbours', () => {
+    // The other half of the same bug: a spherical reach of 16cm across rows 8cm apart put
+    // four buttons in range at once, and the nearest *centre* won — which was reliably the
+    // row below the one the player was touching.
+    const pick = pickByReach(panel, { x: 0.1, y: 1.4, z: 0.04 })
+    expect(pick?.item).toBe(middle)
+  })
+
+  it('is not touched by a hand hovering well in front of the board', () => {
+    expect(pickByReach(panel, { x: 0, y: 1.4, z: 0.2 })).toBeNull()
+  })
+
+  it('is not touched by a hand over the gap between two rows', () => {
+    expect(pickByReach(panel, { x: 0, y: 1.4 - PITCH / 2, z: 0.03 })).toBeNull()
+  })
+})
+
 describe('chooseFocus', () => {
   it('prefers what the hand is touching over what the ray crosses', () => {
     // Reaching for a handle while the controller happens to point at something across the

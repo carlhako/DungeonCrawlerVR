@@ -58,8 +58,9 @@ inert until you do. `Esc` releases it.
 | --- | --- |
 | Left thumbstick | Move (smooth mode) / aim the teleport arc (teleport mode) |
 | Right thumbstick | Turn — smooth by default, snap optional |
-| Right controller | Points the teleport arc, and the interaction ray |
-| Trigger | Use whatever the ray is on, or whatever your hand is holding |
+| Right controller | Points the teleport arc |
+| Either controller | Points the interaction ray — a dim beam shows where |
+| Trigger | Use whatever your beam is on, or whatever your hand is touching |
 | Grip | Use whatever your hand is on (near-grab only) |
 | `A` | Jump (smooth mode only) |
 
@@ -138,11 +139,13 @@ Enter VR and confirm, in order:
     door, walk out through the doorway and back in: the wave clears, the board shows the
     payout, and you are handed back to the foyer on the next wave with more gold. Reload the
     page and both must still be there.
-11. **The shop** — walk to the counter. Point at a weapon on the board and pull the trigger,
-    then reach out and press a button with your hand instead; both must work, and the button
-    under your hand must be the one that lights up. Buy something you can afford, put it in
-    each hand in turn, and try to buy something you cannot — the refusal has to say why.
-    Every purchase must survive a reload.
+11. **The shop** — walk to the counter, then stand back a step. Point at a weapon on the
+    board with either hand and pull the trigger; the beam should reach it and aiming anywhere
+    along a button, not just at its centre, should work. Then reach out and press a button
+    with your hand instead — including the rows directly above and below the one you want,
+    which must never steal the press. Buy something you can afford, put it in each hand in
+    turn, and try to buy something you cannot — the refusal has to say why. Every purchase
+    must survive a reload.
 
 ### Comfort
 
@@ -238,7 +241,9 @@ the next VR entry.
   VR. Desktop looks at a thing and presses a key; VR points at it or reaches for it. The
   moment "what is the player addressing?" gets answered in two places, the two modes start
   disagreeing about what is interactive, and nobody notices until a door won't open in the
-  headset.
+  headset. Candidates are spheres by default and *rectangles* when they declare a `surface`:
+  a shop button is drawn 45cm wide and 7cm tall, and picking the sphere inscribed in it made
+  the panel unusable from more than a hand's reach away.
 - **Text is rasterised on a canvas** (`src/ui/label.ts`), not fetched as a font. SDF text
   libraries pull a default font from a CDN on first use, and a dungeon that silently loses
   all its text when the network hiccups is not a trade worth making.

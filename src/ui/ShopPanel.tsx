@@ -56,14 +56,14 @@ const PIXELS_PER_METRE = 768
 const PANEL_SCALE = 0.72
 
 /**
- * Pick radius as a multiple of half the button's shorter side.
+ * How far in front of the board a hand still counts as touching a button, in metres.
  *
- * Buttons are wide rectangles and the picker works in spheres, so the honest inscribed
- * sphere is much smaller than the thing you can see. Inflated to just under half the gap
- * between rows: generous enough that a controller's wobble at a metre still lands, tight
- * enough that neighbours never swallow each other.
+ * The only tolerance a rectangular button has, and the only one it needs. The buttons are
+ * picked as the rectangles they are drawn as (see `Interactable.surface`), so being generous
+ * here cannot leak a press into the row below — which is exactly what the old spherical
+ * pick did, with a reach of 16cm across rows 8cm apart.
  */
-const PICK_INFLATION = 1.15
+const TOUCH_DEPTH = 0.06
 
 /** How long a purchase message stays up. Long enough to read, short enough not to nag. */
 const FEEDBACK_SECONDS = 3
@@ -121,7 +121,16 @@ export function ShopPanel({ position, rotation = 0 }: ShopPanelProps) {
     () => new Map<string, { item: Interactable; unregister: () => void }>(),
     [],
   )
-  const scratch = useMemo(() => ({ local: new Vector3(), signature: '' }), [])
+  const scratch = useMemo(
+    () => ({
+      local: new Vector3(),
+      right: new Vector3(),
+      up: new Vector3(),
+      normal: new Vector3(),
+      signature: '',
+    }),
+    [],
+  )
 
   useEffect(() => {
     const live = registrations
@@ -169,7 +178,7 @@ export function ShopPanel({ position, rotation = 0 }: ShopPanelProps) {
     if (signature === scratch.signature) return
     scratch.signature = signature
 
-    syncButtons(node, registrations, buttons, scratch.local)
+    syncButtons(node, registrations, buttons, scratch)
     draw(surface.ctx, surface.canvas, save, buttons, shop.selected, shop.feedback)
     surface.texture.needsUpdate = true
   }, SystemOrder.Effects)
@@ -209,10 +218,18 @@ function syncButtons(
   node: Group,
   registrations: Map<string, { item: Interactable; unregister: () => void }>,
   buttons: ShopButton[],
-  local: Vector3,
+  scratch: { local: Vector3; right: Vector3; up: Vector3; normal: Vector3 },
 ): void {
   node.updateWorldMatrix(true, false)
   const seen = new Set<string>()
+
+  // The board's own axes, taken from the matrix rather than rebuilt from the yaw prop, so
+  // the buttons stay attached to the board if it is ever parented to something that moves.
+  const { local, right, up, normal } = scratch
+  node.matrixWorld.extractBasis(right, up, normal)
+  right.normalize()
+  up.normalize()
+  normal.normalize()
 
   for (const button of buttons) {
     seen.add(button.id)
@@ -221,6 +238,10 @@ function syncButtons(
     local.set(button.rect.cx, button.rect.cy, 0.04)
     node.localToWorld(local)
 
+    // Half-extents in world metres: the rect is in layout units and the group scales them.
+    const halfWidth = (button.rect.w / 2) * PANEL_SCALE
+    const halfHeight = (button.rect.h / 2) * PANEL_SCALE
+
     const existing = registrations.get(button.id)
     if (existing) {
       existing.item.position.x = local.x
@@ -228,16 +249,31 @@ function syncButtons(
       existing.item.position.z = local.z
       existing.item.label = button.prompt
       existing.item.enabled = button.state !== 'locked'
+      const surface = existing.item.surface
+      if (surface) {
+        copy(surface.right, right)
+        copy(surface.up, up)
+        copy(surface.normal, normal)
+        surface.halfWidth = halfWidth
+        surface.halfHeight = halfHeight
+      }
       continue
     }
 
     const item: Interactable = {
       id: button.id,
       position: { x: local.x, y: local.y, z: local.z },
-      // Sized to the button rather than to a guess: the thing you can point at is the thing
-      // that is drawn. Half the shorter side, so neighbours never overlap.
-      // In world metres: the rect is in layout units, and the group scales them down.
-      radius: (Math.min(button.rect.w, button.rect.h) / 2) * PICK_INFLATION * PANEL_SCALE,
+      // The pickable shape is the drawn rectangle — see `Interactable.surface`. `radius` only
+      // sizes the prompt that floats above it now.
+      radius: Math.min(halfWidth, halfHeight),
+      surface: {
+        right: { x: right.x, y: right.y, z: right.z },
+        up: { x: up.x, y: up.y, z: up.z },
+        normal: { x: normal.x, y: normal.y, z: normal.z },
+        halfWidth,
+        halfHeight,
+        depth: TOUCH_DEPTH,
+      },
       label: button.prompt,
       enabled: button.state !== 'locked',
       proximity: false,
@@ -257,6 +293,13 @@ function syncButtons(
     registration.unregister()
     registrations.delete(id)
   }
+}
+
+/** Write a three.js vector into a plain one, in place — these are read every fixed step. */
+function copy(target: { x: number; y: number; z: number }, source: Vector3): void {
+  target.x = source.x
+  target.y = source.y
+  target.z = source.z
 }
 
 // ---------------------------------------------------------------------------

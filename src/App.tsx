@@ -13,6 +13,7 @@ import { XRDiagnostics } from '@/scenes/XRDiagnostics'
 import { InteractionDriver } from '@/systems/InteractionDriver'
 import { RunDriver } from '@/systems/RunDriver'
 import { InteractPrompt } from '@/ui/InteractPrompt'
+import { PointerBeam } from '@/ui/PointerBeam'
 import { PlayerRig } from '@/entities/PlayerRig'
 import { TeleportAim } from '@/entities/Teleport'
 import { ComfortVignette } from '@/ui/ComfortVignette'
@@ -89,6 +90,7 @@ function World() {
       <TeleportAim />
       <InteractionDriver />
       <InteractPrompt />
+      <PointerBeam />
       <RunDriver />
       {/* Sprint 0.2's controller readout, kept only in the greybox now that the foyer has
           real things to point at. It is still the fastest way to tell "the stick is dead"

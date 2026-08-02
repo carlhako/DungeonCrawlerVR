@@ -28,6 +28,8 @@ export interface Interactable {
    * Metres. Doubles as the ray target's radius and the near-grab reach, so a big obvious
    * lever is easier to hit than a small fiddly one — which is what you want in VR, where
    * pointing precision is much worse than it looks from a desk.
+   *
+   * Ignored for picking when `surface` is set; still used to size the prompt above it.
    */
   radius: number
   /** Shown in the prompt. A verb: "Open the door", not "Door". */
@@ -43,7 +45,54 @@ export interface Interactable {
    * an answer, a body near six of them is not.
    */
   proximity?: boolean
+  /**
+   * Treat this interactable as a flat rectangle rather than as a sphere.
+   *
+   * A sphere is the right shape for a door handle and the wrong shape for a button on a
+   * board. A shop upgrade row draws 45cm wide and 7cm tall; its inscribed sphere is 4cm
+   * across, so pointing at the middle of a button you can plainly see missed it, while a
+   * hand near the board had four rows inside its reach at once and the nearest *centre*
+   * won — which was reliably the row below the one being touched.
+   *
+   * Mutable and read every step, like `position`, so a panel that moves needs no
+   * re-registration.
+   */
+  surface?: Surface
   onActivate: () => void
+}
+
+/**
+ * A rectangle in world space, centred on the interactable's `position`.
+ *
+ * `right`, `up` and `normal` must be unit vectors and mutually perpendicular; `normal` points
+ * out of the face the player addresses, so the back of a panel is not pointable-through.
+ */
+export interface Surface {
+  right: Vec3
+  up: Vec3
+  normal: Vec3
+  halfWidth: number
+  halfHeight: number
+  /**
+   * How far either side of the plane a hand still counts as touching. This is the whole of
+   * the near-grab tolerance for a rectangle: unlike a sphere, it does not also widen the
+   * target sideways into its neighbours.
+   */
+  depth: number
+}
+
+/**
+ * Slack around a rectangle's edges for a near-grab, in metres.
+ *
+ * Deliberately tiny next to `REACH_MARGIN`. Spheres need a fat margin because the inscribed
+ * sphere is much smaller than the thing you see; a rectangle already *is* the thing you see,
+ * so all a margin buys here is stealing presses from the button next door. Smaller than the
+ * gap between two adjacent shop buttons (11mm), so their tolerance zones cannot overlap.
+ */
+export const SURFACE_TOUCH_MARGIN = 0.005
+
+function dot(a: Vec3, x: number, y: number, z: number): number {
+  return a.x * x + a.y * y + a.z * z
 }
 
 /** How the player reached the focused interactable. The prompt phrases itself from this. */
@@ -52,6 +101,13 @@ export type FocusSource = 'none' | 'ray' | 'reach'
 export interface InteractionState {
   focus: Interactable | null
   source: FocusSource
+  /**
+   * Which controller produced the focus, in VR. Null on desktop.
+   *
+   * Read by the pointer beam so it lights up on the hand that is doing the pointing, and by
+   * the driver so the trigger that confirms is the one on that same hand.
+   */
+  hand: 'left' | 'right' | null
   /** Metres from the pointing origin (or the hand) to the interactable. */
   distance: number
   /**
@@ -65,6 +121,7 @@ export interface InteractionState {
 export const interactionState: InteractionState = {
   focus: null,
   source: 'none',
+  hand: null,
   distance: 0,
   consumedActivate: false,
 }
@@ -89,6 +146,7 @@ export function registerInteractable(item: Interactable): () => void {
 export function clearFocus(): void {
   interactionState.focus = null
   interactionState.source = 'none'
+  interactionState.hand = null
   interactionState.distance = 0
 }
 
@@ -103,13 +161,6 @@ export const RAY_RANGE = 3.5
  * perfectly well and the game keeps saying no.
  */
 export const REACH_MARGIN = 0.12
-
-function distanceSquared(a: Vec3, b: Vec3): number {
-  const dx = a.x - b.x
-  const dy = a.y - b.y
-  const dz = a.z - b.z
-  return dx * dx + dy * dy + dz * dz
-}
 
 export interface Pick {
   item: Interactable
@@ -130,8 +181,30 @@ export function pickByReach(
   let best: Pick | null = null
   for (const item of items) {
     if (!item.enabled) continue
+
+    const dx = hand.x - item.position.x
+    const dy = hand.y - item.position.y
+    const dz = hand.z - item.position.z
+
+    if (item.surface) {
+      const s = item.surface
+      // Perpendicular first: a hand well in front of the board is not touching anything, and
+      // this is the only axis the tolerance is allowed to be generous on.
+      const n = dot(s.normal, dx, dy, dz)
+      if (n < -s.depth || n > s.depth) continue
+      // Then in-plane, against the drawn rectangle. A hand over the gap between two buttons
+      // picks neither, which is the honest answer and much better than picking the wrong one.
+      const u = dot(s.right, dx, dy, dz)
+      const v = dot(s.up, dx, dy, dz)
+      if (Math.abs(u) > s.halfWidth + SURFACE_TOUCH_MARGIN) continue
+      if (Math.abs(v) > s.halfHeight + SURFACE_TOUCH_MARGIN) continue
+      const distance = Math.sqrt(dx * dx + dy * dy + dz * dz)
+      if (!best || distance < best.distance) best = { item, distance }
+      continue
+    }
+
     const reach = item.radius + margin
-    const d2 = distanceSquared(item.position, hand)
+    const d2 = dx * dx + dy * dy + dz * dz
     if (d2 > reach * reach) continue
     const distance = Math.sqrt(d2)
     if (!best || distance < best.distance) best = { item, distance }
@@ -203,6 +276,26 @@ export function pickByRay(
     const oy = item.position.y - origin.y
     const oz = item.position.z - origin.z
 
+    if (item.surface) {
+      const s = item.surface
+      const facing = dot(s.normal, direction.x, direction.y, direction.z)
+      // Only the front face. Parallel rays and rays coming at the back of a panel are not
+      // aiming at it, whatever the maths says about where the plane is.
+      if (facing > -1e-4) continue
+      const along = dot(s.normal, ox, oy, oz) / facing
+      if (along < 0 || along > maxDistance) continue
+
+      const hx = ox - direction.x * along
+      const hy = oy - direction.y * along
+      const hz = oz - direction.z * along
+      // Sign flips because `h` runs from the hit point back to the centre.
+      if (Math.abs(dot(s.right, hx, hy, hz)) > s.halfWidth) continue
+      if (Math.abs(dot(s.up, hx, hy, hz)) > s.halfHeight) continue
+
+      if (!best || along < best.distance) best = { item, distance: along }
+      continue
+    }
+
     // Distance along the ray to the point of closest approach. Negative means the thing is
     // behind you, which is never something you are pointing at.
     const along = ox * direction.x + oy * direction.y + oz * direction.z
@@ -247,13 +340,18 @@ export function chooseFocus(
 }
 
 /** Apply a resolved focus to the shared state. */
-export function setFocus(pick: Pick | null, source: FocusSource): void {
+export function setFocus(
+  pick: Pick | null,
+  source: FocusSource,
+  hand: 'left' | 'right' | null = null,
+): void {
   if (!pick) {
     clearFocus()
     return
   }
   interactionState.focus = pick.item
   interactionState.source = source
+  interactionState.hand = hand
   interactionState.distance = pick.distance
 }
 

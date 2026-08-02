@@ -32,6 +32,12 @@ import { xrInput } from '@/systems/xrInput'
  * Both hands are tested for reach, because reaching for a handle with your off hand is a
  * completely normal thing to do and having it silently not work is maddening.
  */
+/**
+ * Metres from the controller's reported pose to the point that acts as the player's
+ * fingertip, along the controller's forward axis.
+ */
+const CONTROLLER_TIP_OFFSET = 0.055
+
 export function InteractionDriver() {
   const camera = useThree((state) => state.camera)
   const gl = useThree((state) => state.gl)
@@ -56,6 +62,7 @@ export function InteractionDriver() {
     }),
     [],
   )
+  const rayHand = useRef<XRControllerState | null>(null)
 
   useFixedUpdate(
     () => {
@@ -68,26 +75,36 @@ export function InteractionDriver() {
       let proximity: Pick | null = null
       let reachHand: XRControllerState | null = null
 
+      rayHand.current = null
+
       if (inVR) {
-        // Near-grab from either hand.
         for (const pad of [rightPad, leftPad]) {
           const object = pad?.object
           if (!object) continue
-          object.getWorldPosition(scratch.hand)
-          const found = pickByReach(interactables, scratch.hand)
-          if (found && (!reach || found.distance < reach.distance)) {
-            reach = found
+          object.getWorldPosition(scratch.origin)
+          object.getWorldQuaternion(scratch.rotation)
+          scratch.direction.set(0, 0, -1).applyQuaternion(scratch.rotation)
+
+          // Near-grab from either hand, at the tip rather than at the grip. The controller's
+          // reported pose sits in the palm, several centimetres behind where the player feels
+          // their hand end, so touching a board with the grip origin means pushing your hand
+          // into it up to the knuckles.
+          scratch.hand
+            .copy(scratch.origin)
+            .addScaledVector(scratch.direction, CONTROLLER_TIP_OFFSET)
+          const touched = pickByReach(interactables, scratch.hand)
+          if (touched && (!reach || touched.distance < reach.distance)) {
+            reach = touched
             reachHand = pad ?? null
           }
-        }
 
-        // Pointing, from the right controller's -Z, the same axis the teleport arc uses.
-        const pointer = rightPad?.object
-        if (pointer) {
-          pointer.getWorldPosition(scratch.origin)
-          pointer.getWorldQuaternion(scratch.rotation)
-          scratch.direction.set(0, 0, -1).applyQuaternion(scratch.rotation)
-          ray = pickByRay(interactables, scratch.origin, scratch.direction)
+          // Pointing, along the same -Z the teleport arc uses. Both hands, because which one
+          // a player points with is a matter of handedness, not of what the game supports.
+          const aimed = pickByRay(interactables, scratch.origin, scratch.direction)
+          if (aimed && (!ray || aimed.distance < ray.distance)) {
+            ray = aimed
+            rayHand.current = pad ?? null
+          }
         }
       } else {
         // Desktop looks with the camera. In XR the camera belongs to the headset, so this
@@ -106,8 +123,16 @@ export function InteractionDriver() {
       }
 
       const { pick, source } = chooseFocus(reach, ray, proximity)
-      setFocus(pick, source)
-      scratch.focusHand = source === 'reach' ? reachHand : (rightPad ?? null)
+      scratch.focusHand =
+        source === 'reach' ? reachHand : (rayHand.current ?? rightPad ?? null)
+      const handedness = !inVR
+        ? null
+        : scratch.focusHand === leftPad
+          ? 'left'
+          : scratch.focusHand === rightPad
+            ? 'right'
+            : null
+      setFocus(pick, source, handedness)
 
       // A tick on the step the focus changes. In VR this is most of what tells you the game
       // has noticed you are pointing at something, without lighting up half the room.
@@ -122,9 +147,9 @@ export function InteractionDriver() {
       const pressed = inVR
         ? // Trigger to activate at range, and either trigger or grip when your hand is
           // already on the thing — a grab is a grab, whichever finger you use for it.
-          (source === 'reach'
-            ? handPressed(scratch.focusHand, rightPad, leftPad, true)
-            : xrInput.right.trigger.justPressed)
+          // Either way it is the hand that found the focus that has to press, so pointing
+          // with one hand is not confirmed by a trigger pull on the other.
+          handPressed(scratch.focusHand, rightPad, leftPad, source === 'reach')
         : desktopInput.jump.justPressed
 
       if (pressed && activateFocus() && inVR) {

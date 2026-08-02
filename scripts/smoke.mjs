@@ -343,6 +343,30 @@ shop.buyWhenBroke = await pressButton('buy-boneshard-staff')
 shop.saveWhenBroke = await readSave()
 shop.feedback = await page.evaluate(() => window.__DCVR__?.shop ?? null)
 
+/**
+ * And from across the counter, off-centre.
+ *
+ * The headset defect this covers: buttons were picked as the sphere inscribed in them, so an
+ * upgrade row drawn 45cm wide had a 4cm target and pointing at it from any distance missed.
+ * Standing back and aiming 15cm off the centre of a button is the ordinary way to use a
+ * board, and it has to work.
+ */
+shop.standBack = await walkUntil(['KeyS'], (p) => p.z < 1.65, 6)
+shop.aimCentre = await lookAtTarget('select-emberwand')
+await pressButton('select-emberwand')
+const damageRow = (await page.evaluate(() => window.__DCVR__?.targets ?? [])).find(
+  (t) => t.id === 'upgrade-emberwand-damage',
+)
+// The board's own right axis is world -x here, so this offset runs along the row.
+await page.evaluate((t) => window.__DCVR__.lookAt(t.x + 0.15, t.y, t.z), damageRow)
+await page
+  .waitForFunction(() => window.__DCVR__?.focus?.id === 'upgrade-emberwand-damage', null, {
+    timeout: 5000,
+  })
+  .catch(() => {})
+shop.aimOffCentre = await readFocus()
+shop.aimDistance = shop.aimOffCentre?.distance ?? null
+
 foyer.purchase = { ok: shop.saveAfterBuy?.weapons.includes('frostbrand-sword') }
 foyer.saveAfterPurchase = shop.saveAfterEquip
 
@@ -550,6 +574,21 @@ if (!shp.targets?.length) {
   }
   if (shp.feedback?.ok !== false || !shp.feedback?.feedback) {
     failures.push(`an unaffordable purchase said nothing: ${JSON.stringify(shp.feedback)}`)
+  }
+
+  // Pointing from across the counter, off the centre of the button. This is what the shop
+  // failed at in the headset: the pickable target was the sphere inscribed in each button,
+  // 4cm across on a row drawn 45cm wide, so the panel could only be operated by touching it.
+  if (!(shp.aimDistance > 1)) {
+    failures.push(`shop aim was not tested from a distance: ${shp.aimDistance}m`)
+  }
+  if (shp.aimOffCentre?.id !== 'upgrade-emberwand-damage') {
+    failures.push(
+      `aiming 15cm off the centre of a button missed it: ${JSON.stringify(shp.aimOffCentre)}`,
+    )
+  }
+  if (shp.aimOffCentre?.source !== 'ray') {
+    failures.push(`a button pointed at from 1m was not picked by the ray: ${shp.aimOffCentre?.source}`)
   }
 }
 
