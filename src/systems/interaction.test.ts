@@ -135,6 +135,15 @@ describe('pickByProximity', () => {
     const handle = make('handle', [0, 1.05, -1], { enabled: false })
     expect(pickByProximity([handle], eye, FORWARD)).toBeNull()
   })
+
+  it('skips targets that opted out of proximity', () => {
+    // Shop buttons. Standing near a panel of eight of them says nothing about which one you
+    // meant, so they are aimed at instead — while a *hand* on one still counts, which is why
+    // this only turns off proximity and not reach.
+    const button = make('shop-button', [0.1, 1.5, -0.5], { proximity: false })
+    expect(pickByProximity([button], eye, FORWARD)).toBeNull()
+    expect(pickByReach([button], { x: 0.1, y: 1.5, z: -0.5 })?.item).toBe(button)
+  })
 })
 
 describe('chooseFocus', () => {
@@ -152,8 +161,22 @@ describe('chooseFocus', () => {
     expect(chooseFocus(null, pointed).source).toBe('ray')
   })
 
-  it('reports nothing when neither hits', () => {
-    expect(chooseFocus(null, null)).toEqual({ pick: null, source: 'none' })
+  it('prefers where the player is aiming over what they are stood next to', () => {
+    // The bug this fixes: walking up to the shop counter offered the bell — the nearest
+    // thing to the player's body — no matter which button they were staring at.
+    const aimed = { item: make('shop-button', [0, 1.5, -1]), distance: 1 }
+    const beside = { item: make('bell', [0.9, 1, 0]), distance: 0.9 }
+    expect(chooseFocus(null, aimed, beside).pick).toBe(aimed)
+  })
+
+  it('still falls back to proximity when the ray hits nothing', () => {
+    // Which is the whole reason proximity exists: a level look-ray sails over a door handle.
+    const beside = { item: make('handle', [0, 1.05, -1]), distance: 1 }
+    expect(chooseFocus(null, null, beside)).toEqual({ pick: beside, source: 'reach' })
+  })
+
+  it('reports nothing when nothing hits', () => {
+    expect(chooseFocus(null, null, null)).toEqual({ pick: null, source: 'none' })
   })
 })
 

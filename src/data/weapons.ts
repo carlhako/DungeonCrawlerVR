@@ -7,9 +7,12 @@
  * something to validate *against* that isn't a hard-coded list buried in the store.
  *
  * Three weapons for now, which is what Sprint 1.3's shop needs: the starter, one more wand
- * and one melee. The full roster of ten from PLAN.md lands in Sprint 4.1. Combat stats
- * (damage, mana, projectile speed) are deliberately absent — there is no combat until 2.2,
- * and inventing numbers now would only mean tuning them twice.
+ * and one melee. The full roster of ten from PLAN.md lands in Sprint 4.1.
+ *
+ * The stats are the three the shop compares and the three the upgrade tracks move. They are
+ * first drafts — nothing fires until Sprint 2.2, and these will be tuned against a real
+ * enemy rather than against a spreadsheet. What matters now is that they live *here*, so
+ * that when the shop shows "12 → 14" it is reading the same table the weapon will fire from.
  */
 
 export type WeaponId = 'emberwand' | 'boneshard-staff' | 'frostbrand-sword'
@@ -37,6 +40,16 @@ export interface UpgradeTrack {
   costGrowth: number
 }
 
+/** What the shop compares, and what Sprint 2.2 will fire with. */
+export interface WeaponStats {
+  /** Damage per hit, before crits and resistances. */
+  damage: number
+  /** Attacks per second — shots for a wand, swings for a blade. */
+  rate: number
+  /** Critical chance, 0..1. */
+  crit: number
+}
+
 export interface WeaponDefinition {
   id: WeaponId
   name: string
@@ -45,8 +58,10 @@ export interface WeaponDefinition {
   hands: readonly Hand[]
   /** Gold. The starter weapon is 0 because it is owned from the first launch. */
   price: number
-  /** One line for the shop panel in Sprint 1.3. */
+  /** One line for the shop panel. */
   blurb: string
+  /** At upgrade level 0. `weaponStats` applies the levels the player has bought. */
+  stats: WeaponStats
   upgrades: readonly UpgradeTrack[]
 }
 
@@ -64,6 +79,7 @@ export const WEAPONS: Record<WeaponId, WeaponDefinition> = {
     hands: ['main', 'off'],
     price: 0,
     blurb: 'Rapid arcing fire bolts. Forgiving, readable, yours already.',
+    stats: { damage: 12, rate: 3.2, crit: 0.05 },
     upgrades: STANDARD_UPGRADES,
   },
   'boneshard-staff': {
@@ -73,6 +89,7 @@ export const WEAPONS: Record<WeaponId, WeaponDefinition> = {
     hands: ['main'],
     price: 120,
     blurb: 'Hold to charge, release a cone of bone splinters.',
+    stats: { damage: 44, rate: 0.9, crit: 0.08 },
     upgrades: STANDARD_UPGRADES,
   },
   'frostbrand-sword': {
@@ -82,6 +99,7 @@ export const WEAPONS: Record<WeaponId, WeaponDefinition> = {
     hands: ['main', 'off'],
     price: 90,
     blurb: 'Chills on hit. Frozen things shatter.',
+    stats: { damage: 28, rate: 1.6, crit: 0.1 },
     upgrades: STANDARD_UPGRADES,
   },
 }
@@ -112,4 +130,51 @@ export function upgradeTrack(id: WeaponId, axis: UpgradeAxis): UpgradeTrack | nu
  */
 export function upgradeCost(track: UpgradeTrack, currentLevel: number): number {
   return Math.round(track.baseCost * Math.pow(track.costGrowth, currentLevel))
+}
+
+/**
+ * What one level of each axis is worth.
+ *
+ * Additive on the base value rather than compounding, so five levels of damage is a
+ * predictable +90% rather than a number nobody can reason about at the shop counter. Crit is
+ * in percentage points, which is why it is not a multiplier.
+ */
+export const UPGRADE_EFFECT: Record<UpgradeAxis, number> = {
+  damage: 0.18,
+  rate: 0.1,
+  crit: 0.03,
+}
+
+/** A weapon's stats with the player's purchased levels applied. */
+export function weaponStats(
+  id: WeaponId,
+  upgrades: Partial<Record<UpgradeAxis, number>> = {},
+): WeaponStats {
+  const base = WEAPONS[id].stats
+  return {
+    damage: base.damage * (1 + UPGRADE_EFFECT.damage * (upgrades.damage ?? 0)),
+    rate: base.rate * (1 + UPGRADE_EFFECT.rate * (upgrades.rate ?? 0)),
+    // Capped: a guaranteed crit is not an upgrade, it is a different damage number with
+    // extra steps, and it makes the crit feedback in Sprint 2.4 meaningless.
+    crit: Math.min(0.75, base.crit + UPGRADE_EFFECT.crit * (upgrades.crit ?? 0)),
+  }
+}
+
+/** How each axis is named and written on the shop panel. */
+export const AXIS_LABEL: Record<UpgradeAxis, string> = {
+  damage: 'Damage',
+  rate: 'Speed',
+  crit: 'Crit',
+}
+
+/** One stat, formatted for display. Keeps the shop and any later HUD reading the same. */
+export function formatStat(axis: UpgradeAxis, stats: WeaponStats): string {
+  switch (axis) {
+    case 'damage':
+      return stats.damage.toFixed(0)
+    case 'rate':
+      return `${stats.rate.toFixed(1)}/s`
+    case 'crit':
+      return `${Math.round(stats.crit * 100)}%`
+  }
 }

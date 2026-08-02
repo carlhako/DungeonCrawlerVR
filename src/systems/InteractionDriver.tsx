@@ -65,6 +65,7 @@ export function InteractionDriver() {
 
       let reach: Pick | null = null
       let ray: Pick | null = null
+      let proximity: Pick | null = null
       let reachHand: XRControllerState | null = null
 
       if (inVR) {
@@ -98,11 +99,13 @@ export function InteractionDriver() {
           ray = pickByRay(interactables, scratch.origin, scratch.direction)
           // Standing close to something counts as addressing it, the same way reaching for
           // it does in VR — see `pickByProximity` for why desktop needs this and VR doesn't.
-          reach = pickByProximity(interactables, scratch.origin, scratch.direction)
+          // Ranked *below* the ray: where the player is looking is a better statement of
+          // intent than where their feet are.
+          proximity = pickByProximity(interactables, scratch.origin, scratch.direction)
         }
       }
 
-      const { pick, source } = chooseFocus(reach, ray)
+      const { pick, source } = chooseFocus(reach, ray, proximity)
       setFocus(pick, source)
       scratch.focusHand = source === 'reach' ? reachHand : (rightPad ?? null)
 

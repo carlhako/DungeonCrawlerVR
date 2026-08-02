@@ -138,6 +138,11 @@ Enter VR and confirm, in order:
     door, walk out through the doorway and back in: the wave clears, the board shows the
     payout, and you are handed back to the foyer on the next wave with more gold. Reload the
     page and both must still be there.
+11. **The shop** — walk to the counter. Point at a weapon on the board and pull the trigger,
+    then reach out and press a button with your hand instead; both must work, and the button
+    under your hand must be the one that lights up. Buy something you can afford, put it in
+    each hand in turn, and try to buy something you cannot — the refusal has to say why.
+    Every purchase must survive a reload.
 
 ### Comfort
 
@@ -167,8 +172,10 @@ other. To start over, in the browser console:
 __DCVR__.resetSave()
 ```
 
-`__DCVR__` is dev-only. It also exposes `save`, `run`, `send(event)` and, until the shop
-lands in Sprint 1.3, `buyWeapon(id)`.
+`__DCVR__` is dev-only. It also exposes `save`, `run`, `shop`, `targets` (every registered
+interactable and where it is), `send(event)`, `buyWeapon(id)` for setting up a state without
+walking to the counter, and `lookAt(x, y, z)` — which exists because headless Chromium has no
+pointer lock, so the smoke test would otherwise be unable to face anything but `-Z`.
 
 ### Desktop VR emulator
 
@@ -222,6 +229,11 @@ the next VR entry.
   persisted; the wave number is.
 - **Nothing is lost on death.** Progression is pure RPG: dying costs you the wave and nothing
   else. There is a test asserting it.
+- **`src/systems/shop.ts` is a layout, not a UI.** It turns the save into a list of buttons
+  with rectangles, states and prompts; `src/ui/ShopPanel.tsx` rasterises that list onto one
+  canvas and registers an interactable at each rectangle. So "is the buy button still offered
+  for something you already own?" is a question about a data structure, answerable in a unit
+  test rather than by putting a headset on and walking to a counter.
 - **`src/systems/interaction.ts`** — one focus, picked once per step, shared by desktop and
   VR. Desktop looks at a thing and presses a key; VR points at it or reaches for it. The
   moment "what is the player addressing?" gets answered in two places, the two modes start
@@ -250,8 +262,11 @@ scripts/     smoke test
 The smoke test does more than check that something rendered. It plays the game: it walks the
 player across the foyer until the door offers itself, presses `Space`, asserts that a wave
 started and that the player did *not* also jump, walks them out through the doorway and back
-in to clear the wave, checks the payout landed and the wave counter advanced, buys a weapon,
-then **reloads the page** and asserts the gold, the weapon and the wave number all came back.
+in to clear the wave, checks the payout landed and the wave counter advanced, then walks to
+the shop counter and buys and equips a weapon *through the panel* — aiming at each button and
+pressing the key, not calling the store — including a purchase it cannot afford, which has to
+be refused out loud. Then it **reloads the page** and asserts the gold, the weapon, the
+loadout and the wave number all came back.
 Finally it loads the greybox and runs the movement course — up the staircase and a standing
 jump, staying grounded and inside the level.
 

@@ -1,8 +1,10 @@
 import { gameLoop } from './loop'
-import { playerState, type PlayerState } from '@/systems/player'
-import { interactionState } from '@/systems/interaction'
+import { DESKTOP_EYE_HEIGHT, playerState, type PlayerState } from '@/systems/player'
+import { clampPitch, desktopInput } from '@/systems/desktopInput'
+import { interactables, interactionState } from '@/systems/interaction'
 import { useRun, type RunEvent, type RunPhase } from '@/systems/run'
 import { useGame, type TransactionResult } from '@/systems/game'
+import { useShop } from '@/systems/shop'
 import type { SaveData } from '@/systems/save'
 import type { WeaponId } from '@/data/weapons'
 
@@ -50,6 +52,8 @@ export interface DebugHandle {
    * every weapon the player bought renders exactly as well as one that hasn't.
    */
   readonly save: SaveData
+  /** What the shop panel is showing, and what it last said. */
+  readonly shop: { selected: string; feedback: string | null; ok: boolean | null }
   /** Drive a transition by hand, from the console or the smoke test. */
   send(event: RunEvent): boolean
   /**
@@ -61,6 +65,21 @@ export interface DebugHandle {
   buyWeapon(id: WeaponId): TransactionResult
   /** Wipe progression back to a first launch. Settings are untouched. */
   resetSave(): void
+  /**
+   * Every registered interactable, flattened.
+   *
+   * The smoke test uses this to find out where the shop's buttons actually ended up, rather
+   * than hard-coding coordinates that a layout change would silently invalidate.
+   */
+  readonly targets: Array<{ id: string; x: number; y: number; z: number; enabled: boolean }>
+  /**
+   * Point the desktop camera at a world position.
+   *
+   * Headless Chromium has no pointer lock, so mouselook is unavailable and the player can
+   * only ever face -Z. Without this the entire shop — which necessarily faces the room from
+   * the far side of the counter — would be untestable outside a headset.
+   */
+  lookAt(x: number, y: number, z: number): void
 }
 
 export function installDebugHandle(): void {
@@ -96,9 +115,30 @@ export function installDebugHandle(): void {
     get save() {
       return useGame.getState().save
     },
+    get shop() {
+      const { selected, feedback } = useShop.getState()
+      return { selected, feedback: feedback?.text ?? null, ok: feedback?.ok ?? null }
+    },
     send: (event) => useRun.getState().send(event),
     buyWeapon: (id) => useGame.getState().buyWeapon(id),
     resetSave: () => useGame.getState().resetSave(),
+    get targets() {
+      return interactables.map((item) => ({
+        id: item.id,
+        x: +item.position.x.toFixed(3),
+        y: +item.position.y.toFixed(3),
+        z: +item.position.z.toFixed(3),
+        enabled: item.enabled,
+      }))
+    },
+    lookAt: (x, y, z) => {
+      const dx = x - playerState.position.x
+      const dy = y - (playerState.position.y + DESKTOP_EYE_HEIGHT)
+      const dz = z - playerState.position.z
+      // Yaw 0 looks down -Z, so the heading that points at (dx, dz) is atan2(-dx, -dz).
+      desktopInput.yaw = Math.atan2(-dx, -dz)
+      desktopInput.pitch = clampPitch(Math.atan2(dy, Math.hypot(dx, dz)))
+    },
   }
   ;(window as unknown as { __DCVR__: DebugHandle }).__DCVR__ = handle
 }

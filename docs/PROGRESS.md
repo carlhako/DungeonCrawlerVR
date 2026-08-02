@@ -7,15 +7,15 @@ sprint, before committing. The roadmap itself lives in [PLAN.md](PLAN.md).
 
 ## Current position
 
-> **Next up: Sprint 1.3 — Shop & weapon dialog**
+> **Sprint 1.3 is built and green on desktop — awaiting the Quest 3 sign-off.**
 >
-> The whole meta loop runs and is signed off on the Quest 3: 100 gold, open the door, a wave
-> begins, walking back into the foyer clears it and pays out, and all of it survives a
-> reload. A board by the door shows gold and what the run is doing.
+> Epic 1 is now complete end to end: start with 100 gold, buy and equip a weapon at a board
+> on the shop counter, open the door, clear a wave, come back richer and spend it. All of it
+> survives a reload.
 >
-> 1.3 puts a real panel on the shop counter and retires the dev-console purchase. The wave
-> itself is still a walk into an empty passage — there is no dungeon until 2.1 and nothing to
-> kill until 2.3.
+> Next after sign-off is **Epic 2 — Wave Combat Core**, starting with **Sprint 2.1 —
+> Procedural dungeon generation**. That is where the wave stops being a walk into an empty
+> passage and the CC0 tile kit finally lands.
 
 ---
 
@@ -28,8 +28,8 @@ sprint, before committing. The roadmap itself lives in [PLAN.md](PLAN.md).
 | | 0.3 Movement & physics | ✅ Done |
 | **1 — Foyer & Meta Loop** | 1.1 Foyer scene & interaction | ✅ Done |
 | | 1.2 Game state & persistence | ✅ Done |
-| | 1.3 Shop & weapon dialog | 🟨 In progress |
-| **2 — Wave Combat Core** | 2.1 Procedural dungeon generation | ⬜ |
+| | 1.3 Shop & weapon dialog | 🟨 Awaiting headset sign-off |
+| **2 — Wave Combat Core** | 2.1 Procedural dungeon generation | ⬜ Next |
 | | 2.2 Weapon & attack framework | ⬜ |
 | | 2.3 Enemies, AI & wave loop | ⬜ |
 | | 2.4 Hit feedback & VFX | ⬜ |
@@ -328,6 +328,66 @@ Decisions made during the sprint:
 - Known scaffolding, all of it with an owner: the loading pause and the walk-out-walk-back
   clear condition belong to the Wave Director in 2.3; buying a weapon goes through the dev
   console until the shop lands in 1.3.
+
+### 🟨 Sprint 1.3 — Shop & weapon dialog
+
+**Verified on desktop:** typecheck clean · 235/235 unit tests · production build succeeds ·
+smoke test buys and equips a weapon *through the panel* — walking to the counter, aiming at
+each button, pressing the key — including a purchase it cannot afford, then reloading the
+page and finding the gold, the weapon, the loadout and the wave number all still there.
+
+**Awaiting a Quest 3 pass.** What to check, in the headset:
+
+1. Walk to the counter. The board reads your gold, the three weapons and what you own.
+2. **Point** at a weapon row with the controller and pull the trigger; the row you are aimed
+   at should highlight, and only that one.
+3. **Reach out** and press a button with your hand instead. Same result, and the button
+   under your hand must win over whatever the ray is crossing.
+4. Buy something you can afford, then put it in each hand in turn.
+5. Try to buy something you cannot afford. The refusal must say why, on the board.
+6. Reload the page. Everything you bought and equipped is still there.
+
+Delivered:
+
+- `src/systems/shop.ts` — the shop as a *layout*: the save in, a list of buttons out, each
+  with a rectangle, a state and a prompt. 20 tests, including that no two buttons overlap and
+  none is drawn off the edge of the board.
+- `src/ui/ShopPanel.tsx` — one canvas texture for the whole board, with an interactable
+  registered at the world position of each rectangle.
+- `src/data/weapons.ts` — base stats and the upgrade effects, so the shop's "12 → 14" reads
+  from the same table Sprint 2.2 will fire from.
+- `src/systems/interaction.ts` — a `proximity` opt-out, and a corrected focus precedence.
+
+Decisions made during the sprint:
+
+- **Aim beats proximity on desktop.** Standing at the counter offered the *bell* — the
+  nearest thing to the player's body — no matter which button they were staring at. Focus now
+  resolves reach → ray → proximity, so proximity is the fallback it was always meant to be:
+  it exists because a level look-ray sails over a door handle, not because being near
+  something is a statement of intent. Caught by the smoke test on its first run at the shop.
+- **Panels opt out of proximity entirely.** With eight buttons 12cm apart, "nearest to the
+  player" is a coin toss. They are aimed at, or touched. A hand *on* a button still wins.
+- **The layout is data and the canvas is presentation.** Every question worth asking about a
+  shop — is the buy button still offered for something you own, does an unaffordable upgrade
+  read as unaffordable, can a two-hander go in your off hand — is a question about a list of
+  objects. Answering those in a headset is an appalling way to spend an evening.
+- **The focus highlight is a quad, not part of the drawing.** Pointing along a row changes
+  the focus several times a second, and re-rasterising a megapixel to move a border is a
+  hitch you can feel in a headset. The canvas now redraws only when the *contents* change.
+- **The panel is drawn at 0.72 scale.** At full size, a player standing where the counter
+  puts them had a board filling most of their field of view. Physically large UI is
+  uncomfortable in VR in a way it never is on a monitor.
+- **Prices are measured before labels are drawn**, and the label condenses into what is
+  left. "Boneshard Staff120g" was the first thing the render showed; weapon names are content
+  and will get longer.
+- **Stats are shown for what you don't own yet**, next to what you are currently holding.
+  A price with no numbers beside it is not a decision anyone can make.
+- **Refusals are spoken, not silent.** "Not enough gold." on the board. A button that quietly
+  does nothing is indistinguishable from a broken one — the same rule the bell taught in 1.1.
+- Known scaffolding: purchase SFX is deferred to Sprint 3.2 with the rest of the audio; the
+  visible flash, the message strip and the haptic click stand in for it. `__DCVR__.lookAt`
+  exists because headless Chromium has no pointer lock, and without it the shop — which
+  necessarily faces the room from behind the counter — could not be tested outside a headset.
 
 ---
 

@@ -6,6 +6,7 @@ import { useFixedUpdate } from '@/core/simulation'
 import { Door } from '@/entities/Door'
 import { registerInteractable, type Interactable } from '@/systems/interaction'
 import { flicker } from '@/systems/torch'
+import { ShopPanel } from '@/ui/ShopPanel'
 import { StatusBoard } from '@/ui/StatusBoard'
 
 /**
@@ -251,7 +252,11 @@ function setBellGlow(mesh: Mesh, intensity: number): void {
 }
 
 /**
- * The shop counter. Furniture for now — Sprint 1.3 puts the weapon dialog on it.
+ * The shop counter, with the weapon board standing on it.
+ *
+ * The board faces the room (-Z) so you read it from in front of the counter rather than by
+ * leaning over it, and it sits on the near edge so a VR player can reach out and touch a
+ * button instead of stretching across three-quarters of a metre of oak.
  *
  * The bell is registered as a second interactable on purpose: an interaction system with
  * exactly one target in the world proves nothing about whether it picks the *right* one.
@@ -273,7 +278,7 @@ function ShopCounter() {
   const bell = useMemo<Interactable>(
     () => ({
       id: 'shop-bell',
-      position: { x: position[0] - 0.5, y: 1.02, z: position[2] - 0.35 },
+      position: { x: position[0] + 0.9, y: 1.02, z: position[2] - 0.35 },
       radius: 0.16,
       label: 'Ring the bell',
       enabled: true,
@@ -317,7 +322,12 @@ function ShopCounter() {
           <meshStandardMaterial color={WOOD} roughness={0.85} />
         </mesh>
       </RigidBody>
-      <mesh ref={bellMesh} position={[-0.5, 1.02, -0.35]} castShadow>
+      {/* Facing the room, on the near edge, within arm's reach of someone standing at the
+          counter rather than across it. */}
+      <ShopPanel position={[0, 1.38, -0.32]} rotation={Math.PI} />
+
+      {/* Moved to the far end of the counter to keep clear of the board. */}
+      <mesh ref={bellMesh} position={[0.9, 1.02, -0.35]} castShadow>
         <sphereGeometry args={[0.08, 12, 10]} />
         <meshStandardMaterial
           color="#7a6230"

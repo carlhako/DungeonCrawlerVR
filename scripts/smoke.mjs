@@ -73,6 +73,12 @@ await page.waitForFunction(
   { timeout: 15000 },
 )
 
+// Let the first frames go by before sampling. The first pass through a scene rasterises the
+// shop panel, compiles shaders and uploads textures — on a GPU that is a few milliseconds,
+// under SwiftShader it is a visible stall, and sampling across it measures startup rather
+// than whether the fixed timestep is keeping up with the clock, which is the actual question.
+await page.waitForTimeout(700)
+
 const info = await page.evaluate(async (sampleMs) => {
   const canvas = document.querySelector('canvas')
   const gl = canvas.getContext('webgl2')
@@ -277,11 +283,68 @@ foyer.runOnClear = await readRun()
 await page.waitForFunction(() => window.__DCVR__?.run.phase === 'foyer', { timeout: 10000 })
 foyer.saveAfterWave = await readSave()
 
-// Spend some of it. There is no shop until Sprint 1.3, so this goes through the dev handle —
-// but what it buys is a real transaction against the real store, which is the thing that has
-// to still be there after a reload.
-foyer.purchase = await page.evaluate(() => window.__DCVR__?.buyWeapon('frostbrand-sword'))
-foyer.saveAfterPurchase = await readSave()
+/**
+ * The shop, which is Sprint 1.3's acceptance test.
+ *
+ * Driven the way a player drives it: walk to the counter, look at a button, press the key.
+ * Nothing here calls the store directly — the point is to prove that the buttons drawn on
+ * the panel are registered where they appear and do what they say.
+ *
+ * Headless Chromium has no pointer lock, so aiming goes through the dev handle's `lookAt`.
+ * That is the only concession; everything after it is the real interaction path.
+ */
+async function lookAtTarget(id) {
+  const target = (await page.evaluate(() => window.__DCVR__?.targets ?? [])).find(
+    (t) => t.id === id,
+  )
+  if (!target) return null
+  await page.evaluate((t) => window.__DCVR__.lookAt(t.x, t.y, t.z), target)
+  // Wait for the focus to actually land rather than for a fixed delay. Under SwiftShader a
+  // single frame can take longer than any delay worth writing, and a timed wait here failed
+  // intermittently for reasons that had nothing to do with the shop.
+  await page
+    .waitForFunction((want) => window.__DCVR__?.focus?.id === want, id, { timeout: 5000 })
+    .catch(() => {})
+  return readFocus()
+}
+
+async function pressButton(id) {
+  const focus = await lookAtTarget(id)
+  if (focus?.id !== id) return focus
+  await page.keyboard.press('Space')
+  await page.waitForTimeout(400)
+  return focus
+}
+
+const shop = {}
+// Turn around and walk to the counter. The panel faces the room from the far side, so a
+// player who never turns never sees it — which is exactly the case a headless test misses.
+await page.evaluate(() => window.__DCVR__.lookAt(3.4, 1.5, 2.88))
+shop.walkOver = await walkUntil(['KeyW'], (p) => p.z > 1.9 && p.x > 3.0, 15)
+// Back off to a arm's-length reading distance. Pressed right up against the board, the
+// angles to the outer buttons get steep enough that a level-ish ray misses them — which is
+// true for a real player too, and is what the prompt is for.
+shop.settle = await walkUntil(['KeyS'], (p) => p.z < 2.15, 5)
+shop.targets = await page.evaluate(() =>
+  (window.__DCVR__?.targets ?? []).filter((t) => t.id.startsWith('select-')).map((t) => t.id),
+)
+
+// Inspect a weapon you do not own, then buy it, then put it in your off hand.
+shop.selectFocus = await pressButton('select-frostbrand-sword')
+shop.buyFocus = await pressButton('buy-frostbrand-sword')
+shop.saveAfterBuy = await readSave()
+shop.equipFocus = await pressButton('equip-frostbrand-sword-off')
+shop.saveAfterEquip = await readSave()
+
+// And a refusal: nothing should be affordable at this point, and the panel has to say so
+// rather than going quiet.
+shop.brokeAttempt = await pressButton('select-boneshard-staff')
+shop.buyWhenBroke = await pressButton('buy-boneshard-staff')
+shop.saveWhenBroke = await readSave()
+shop.feedback = await page.evaluate(() => window.__DCVR__?.shop ?? null)
+
+foyer.purchase = { ok: shop.saveAfterBuy?.weapons.includes('frostbrand-sword') }
+foyer.saveAfterPurchase = shop.saveAfterEquip
 
 /**
  * Now the greybox, for the movement course. It is the only room with a staircase, a ramp
@@ -334,6 +397,7 @@ await page.screenshot({ path: `${OUT}/smoke.png` })
 await browser.close()
 
 info.foyer = foyer
+info.shop = shop
 info.movement = movement
 
 const results = { ...info, consoleErrors }
@@ -437,6 +501,9 @@ if (!foy.saveAtStart) {
     if (!foy.saveAfterReload.weapons.includes('frostbrand-sword')) {
       failures.push('the purchased weapon did not survive the reload')
     }
+    if (foy.saveAfterReload.equipped.off !== 'frostbrand-sword') {
+      failures.push('the equipped loadout did not survive the reload')
+    }
     if (foy.saveAfterReload.wave !== foy.saveAfterWave.wave) {
       failures.push(`wave progress did not survive the reload: ${foy.saveAfterReload.wave}`)
     }
@@ -452,6 +519,37 @@ if (!foy.saveAtStart) {
         `run resumed on the wrong wave: run ${foy.runAfterReload?.wave}, save ${foy.saveAfterReload.wave}`,
       )
     }
+  }
+}
+
+// Sprint 1.3: the shop, driven through the interaction system rather than through the store.
+const shp = info.shop
+if (!shp.targets?.length) {
+  failures.push('the shop panel registered no buttons — is it mounted?')
+} else {
+  if (shp.selectFocus?.id !== 'select-frostbrand-sword') {
+    failures.push(`could not aim at a shop button: ${JSON.stringify(shp.selectFocus)}`)
+  }
+  // Buying through the panel, not through the store. A button that renders and is registered
+  // somewhere else in the room looks perfect and is unusable.
+  if (shp.buyFocus?.id !== 'buy-frostbrand-sword') {
+    failures.push('the buy button was not offered after selecting an unowned weapon')
+  }
+  if (!shp.saveAfterBuy?.weapons.includes('frostbrand-sword')) {
+    failures.push('pressing buy did not buy the weapon')
+  }
+  if (!(shp.saveAfterBuy.gold < foyer.saveAfterWave.gold)) {
+    failures.push(`buying did not cost gold: ${shp.saveAfterBuy.gold}`)
+  }
+  if (shp.saveAfterEquip?.equipped.off !== 'frostbrand-sword') {
+    failures.push(`equipping to the off hand did not take: ${JSON.stringify(shp.saveAfterEquip?.equipped)}`)
+  }
+  // Gold validation: the second weapon is out of reach, and the refusal has to be visible.
+  if (shp.saveWhenBroke?.weapons.includes('boneshard-staff')) {
+    failures.push('bought a weapon the player could not afford')
+  }
+  if (shp.feedback?.ok !== false || !shp.feedback?.feedback) {
+    failures.push(`an unaffordable purchase said nothing: ${JSON.stringify(shp.feedback)}`)
   }
 }
 

@@ -34,6 +34,15 @@ export interface Interactable {
   label: string
   /** A disabled interactable stays registered but is never focused. Locked doors, later. */
   enabled: boolean
+  /**
+   * Whether standing near it on desktop is enough to address it. Defaults to true.
+   *
+   * Off for anything that sits next to its neighbours — a panel of shop buttons, where
+   * "nearest thing to the player" is not a guess about intent, it is a coin toss. Those are
+   * aimed at, not walked into. Reaching for one in VR still works: a hand *on* a button is
+   * an answer, a body near six of them is not.
+   */
+  proximity?: boolean
   onActivate: () => void
 }
 
@@ -156,6 +165,7 @@ export function pickByProximity(
   let best: Pick | null = null
   for (const item of items) {
     if (!item.enabled) continue
+    if (item.proximity === false) continue
 
     const dx = item.position.x - position.x
     const dy = item.position.y - position.y
@@ -211,18 +221,28 @@ export function pickByRay(
 }
 
 /**
- * Resolve the two candidates into one focus.
+ * Resolve the candidates into one focus, in order of how good a signal each one is.
  *
- * Reach wins over ray. The alternative — nearest wins — reads as the game changing its mind
- * about what you are holding as your hand drifts, which is much worse than a rule you can
- * feel: touch it, or point at it.
+ * 1. **Reach** — a hand physically on the thing. Unbeatable: if you are holding the handle,
+ *    you meant the handle, whatever the ray happens to cross on the far side of the room.
+ * 2. **Ray** — deliberate aim, with either a controller or the desktop camera.
+ * 3. **Proximity** — standing near it on desktop, where a level look-ray sails over anything
+ *    below eye height. A fallback, and only a fallback: it was outranking aim, so walking up
+ *    to a shop counter offered the bell no matter which button you were staring at.
+ *
+ * The alternative at every level — nearest wins — reads as the game changing its mind about
+ * what you are addressing as you drift, which is much worse than a rule you can feel.
  */
-export function chooseFocus(reach: Pick | null, ray: Pick | null): {
-  pick: Pick | null
-  source: FocusSource
-} {
+export function chooseFocus(
+  reach: Pick | null,
+  ray: Pick | null,
+  proximity: Pick | null = null,
+): { pick: Pick | null; source: FocusSource } {
   if (reach) return { pick: reach, source: 'reach' }
   if (ray) return { pick: ray, source: 'ray' }
+  // Reported as 'reach' rather than a fourth source: from the player's side it is the same
+  // gesture as being near enough to touch, and the prompt should read the same way.
+  if (proximity) return { pick: proximity, source: 'reach' }
   return { pick: null, source: 'none' }
 }
 
