@@ -23,6 +23,7 @@ import {
   type Projectile,
 } from '@/systems/combat/projectiles'
 import { stepMana } from '@/systems/combat/resources'
+import { publishFx } from '@/systems/fx/signals'
 import { handWeapons, manaPool, projectilePool } from '@/systems/combat/state'
 import { createRigPose, readRigPose } from '@/systems/combat/rigs'
 import {
@@ -214,6 +215,17 @@ function stepHand(
     critChance: stats.crit,
     source: { kind: 'projectile', weaponId: definition.id, hand: slot },
   })
+
+  // The flash is published rather than drawn here: this file owns whether a shot happens, and
+  // `FxDriver` owns what it looks like. Reported at the muzzle and along the line of fire,
+  // which for a wand is the controller's target-ray space — the same line the bolt leaves on.
+  publishFx({
+    kind: 'muzzle',
+    point: { ...pose.origin },
+    direction: { ...pose.direction },
+    element: definition.element,
+  })
+
   buzz(slot, Haptic.fire)
 }
 
@@ -314,7 +326,23 @@ function resolveImpact(
   point: { x: number; y: number; z: number },
   targetId: string | null,
 ): void {
-  if (!targetId) return
+  if (!targetId) {
+    // Stone, not flesh: nothing lost health, but a bolt bursting against a wall is still the
+    // clearest answer the game can give to "you missed". The normal we have is the reverse of
+    // the bolt's own travel — exact for a wall met head-on, close enough for one met at an
+    // angle, and free.
+    const speed = Math.hypot(projectile.vx, projectile.vy, projectile.vz)
+    publishFx({
+      kind: 'worldImpact',
+      point: { ...point },
+      direction:
+        speed > 0
+          ? { x: -projectile.vx / speed, y: -projectile.vy / speed, z: -projectile.vz / speed }
+          : { x: 0, y: 1, z: 0 },
+      element: projectile.element,
+    })
+    return
+  }
 
   land(
     {

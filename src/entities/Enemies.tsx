@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { AdditiveBlending, Color, Group, MeshStandardMaterial } from 'three'
+import type { IUniform } from 'three'
 import { CORPSE_SECONDS, ENEMIES, SPAWN_SECONDS } from '@/data/enemies'
 import { hasStatus } from '@/systems/combat/damage'
+import { dissolveAmount } from '@/systems/fx/dissolve'
 import type { Enemy } from '@/systems/enemies/pool'
 import { enemyPool } from '@/systems/enemies/state'
 
@@ -36,6 +38,94 @@ const CORPSE_SINK = 0.9
 /** The height every slot is modelled at, before it is scaled to the type it is holding. */
 const NOMINAL_HEIGHT = 1.8
 
+/**
+ * The dissolve, injected into three's standard material rather than replacing it.
+ *
+ * A body that arrives or leaves by fading its opacity is a transparent body: it sorts against
+ * every other transparent surface in the scene, it stops writing depth, and in a corridor lit
+ * by six torches it reads as a ghost rather than as a thing appearing. A dissolve stays fully
+ * opaque throughout — fragments are either there or discarded — so nothing sorts, and the
+ * burning edge gives the effect a direction, which is what makes materialising and dying read
+ * as opposites rather than as the same fade played backwards.
+ *
+ * `onBeforeCompile` because the alternative is reimplementing three's lighting in a
+ * `ShaderMaterial`, and this model still wants to be lit by the torches around it. The cache
+ * key is what stops three sharing a compiled program between the dissolving and plain
+ * variants of the same material — without it, the injection silently applies to neither or
+ * both depending on which compiled first.
+ */
+function withDissolve(material: MeshStandardMaterial, edge: string) {
+  const uniforms: { uDissolve: IUniform<number>; uEdge: IUniform<Color> } = {
+    uDissolve: { value: 0 },
+    uEdge: { value: new Color(edge) },
+  }
+
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.uDissolve = uniforms.uDissolve
+    shader.uniforms.uEdge = uniforms.uEdge
+
+    shader.vertexShader = shader.vertexShader
+      .replace('void main() {', 'varying vec3 vDissolvePosition;\nvoid main() {')
+      .replace(
+        '#include <begin_vertex>',
+        '#include <begin_vertex>\n  vDissolvePosition = position;',
+      )
+
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        'void main() {',
+        /* glsl */ `
+        uniform float uDissolve;
+        uniform vec3 uEdge;
+        varying vec3 vDissolvePosition;
+
+        float dcvrHash(vec3 p) {
+          return fract(sin(dot(p, vec3(12.9898, 78.233, 37.719))) * 43758.5453);
+        }
+
+        // Value noise, trilinearly interpolated. Cheap, and smooth enough that the edge reads
+        // as burning across the body rather than as a checkerboard of discarded pixels.
+        float dcvrNoise(vec3 p) {
+          vec3 i = floor(p);
+          vec3 f = fract(p);
+          f = f * f * (3.0 - 2.0 * f);
+          float n000 = dcvrHash(i);
+          float n100 = dcvrHash(i + vec3(1.0, 0.0, 0.0));
+          float n010 = dcvrHash(i + vec3(0.0, 1.0, 0.0));
+          float n110 = dcvrHash(i + vec3(1.0, 1.0, 0.0));
+          float n001 = dcvrHash(i + vec3(0.0, 0.0, 1.0));
+          float n101 = dcvrHash(i + vec3(1.0, 0.0, 1.0));
+          float n011 = dcvrHash(i + vec3(0.0, 1.0, 1.0));
+          float n111 = dcvrHash(i + vec3(1.0, 1.0, 1.0));
+          return mix(
+            mix(mix(n000, n100, f.x), mix(n010, n110, f.x), f.y),
+            mix(mix(n001, n101, f.x), mix(n011, n111, f.x), f.y),
+            f.z
+          );
+        }
+
+        void main() {`,
+      )
+      // Sampled in *object* space, so the pattern is welded to the body and does not swim
+      // across it as the thing walks or falls over.
+      .replace(
+        '#include <dithering_fragment>',
+        /* glsl */ `
+        float dcvrThreshold = dcvrNoise(vDissolvePosition * 7.0);
+        if (uDissolve > 0.0 && dcvrThreshold < uDissolve) discard;
+        // The band just ahead of the threshold glows, so the dissolve has a burning edge.
+        float dcvrEdge = uDissolve > 0.0
+          ? smoothstep(uDissolve + 0.16, uDissolve, dcvrThreshold)
+          : 0.0;
+        gl_FragColor.rgb = mix(gl_FragColor.rgb, uEdge * 2.4, dcvrEdge);
+        #include <dithering_fragment>`,
+      )
+  }
+
+  material.customProgramCacheKey = () => 'dcvr-dissolve'
+  return uniforms
+}
+
 export function Enemies() {
   return (
     <>
@@ -57,8 +147,8 @@ function EnemyBody({ enemy }: { enemy: Enemy }) {
    * Both eyes share one material instance, which is the only way "the eyes flare together"
    * stays true without a second ref and a second copy of the same arithmetic.
    */
-  const materials = useMemo(() => {
-    return {
+  const { materials, dissolve } = useMemo(() => {
+    const built = {
       skin: new MeshStandardMaterial({
         color: '#8a8a8a',
         roughness: 0.85,
@@ -81,6 +171,14 @@ function EnemyBody({ enemy }: { enemy: Enemy }) {
         depthWrite: false,
         toneMapped: false,
       }),
+    }
+
+    // Only the solid parts dissolve. The eyes and the halo are light rather than body, and
+    // light does not crumble — they fade, which is also what keeps the last thing visible on
+    // a dying enemy the pair of eyes going out.
+    return {
+      materials: built,
+      dissolve: [withDissolve(built.skin, '#ff7a2a'), withDissolve(built.dark, '#ff7a2a')],
     }
   }, [])
 
@@ -116,6 +214,16 @@ function EnemyBody({ enemy }: { enemy: Enemy }) {
     const presence = arriving * (1 - dying)
     group.position.y -= dying * CORPSE_SINK
 
+    // The body itself arrives and leaves by dissolving rather than by fading — see
+    // `withDissolve`. The eyes and the halo still use `presence`, below.
+    const amount = dissolveAmount({
+      phase: enemy.phase,
+      timer: enemy.timer,
+      spawnSeconds: SPAWN_SECONDS,
+      corpseSeconds: CORPSE_SECONDS,
+    })
+    for (const uniforms of dissolve) uniforms.uDissolve.value = amount
+
     if (scale.current) scale.current.scale.setScalar(definition.height / NOMINAL_HEIGHT)
 
     const tilt = lean.current
@@ -146,8 +254,6 @@ function EnemyBody({ enemy }: { enemy: Enemy }) {
     const burning = hasStatus(enemy.target.statuses, 'burning')
     const chilled = hasStatus(enemy.target.statuses, 'chilled')
     materials.skin.color.set(definition.colour)
-    materials.skin.opacity = presence
-    materials.skin.transparent = presence < 1
     materials.skin.emissive.set(
       enemy.flash > 0 ? '#ffffff' : burning ? '#ff6a1f' : chilled ? '#8fd8ff' : definition.colour,
     )
@@ -168,8 +274,6 @@ function EnemyBody({ enemy }: { enemy: Enemy }) {
     // for the cost of one draw, so a corridor tells you something is in it before the light
     // reaches it. It swells with the wind-up too.
     materials.halo.opacity = 0.1 * presence * (1 + winding * 1.4)
-    materials.dark.opacity = presence
-    materials.dark.transparent = presence < 1
   })
 
   return (

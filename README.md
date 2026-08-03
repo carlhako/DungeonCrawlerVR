@@ -254,7 +254,25 @@ Enter VR and confirm, in order:
     Then go back out and let something kill you. You should be put back in the foyer whole,
     with **exactly** the gold, weapons and wave number you left with. Dying costs the wave and
     nothing else.
-18. **Starting over** — turn around. The "new game" plaque is on the back wall behind the
+18. **How the hits feel** — this is a judgement call and the headset is the only place to make
+    it. Fire the Emberwand in a dark corridor: there should be a flash at the tip as it goes
+    off, a streak of embers following each bolt, and sparks off the stone where it lands. Hit
+    something and it should throw sparks in its own element's colour; kill something and it
+    should come apart in a wider burst of ash and then **dissolve** — the body burning away
+    from a glowing edge over about a second and a half, not blinking out and not fading into a
+    ghost. The eyes should be the last thing to go.
+    - **Nothing may move your view.** There is no screenshake in VR, ever, and no hitstop
+      either: on a monitor the world briefly slowing when you land a kill is punctuation, but
+      in a headset your head keeps moving while the world does not, which is the exact
+      mismatch that makes people ill. If landing a hit, taking one, or killing something
+      moves, tilts, slows or jolts your view by any amount at all, stop and report it — it
+      beats everything else on this list.
+    - **Legibility beats spectacle.** In a corridor lit by six torches, a burst that whites
+      out what you are fighting is worse than no burst. If you lose track of a Skulker inside
+      its own hit effect, say so.
+    - **The frame.** A pack dying at once is the heaviest moment in the game for the particle
+      pool. Watch for judder on head turns while three things come apart in front of you.
+19. **Starting over** — turn around. The "new game" plaque is on the back wall behind the
     spawn. One press arms it and it says so; a second wipes gold, weapons and upgrades back
     to a first launch. Leave it armed and walk away — it must stand down by itself. Then
     check the settings board: your comfort options must *not* have been wiped with it.

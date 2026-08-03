@@ -14,6 +14,7 @@ import type { WeaponId } from '@/data/weapons'
 import { combatSnapshot } from '@/systems/combat/state'
 import { applyDamage, damageables, publishDamage } from '@/systems/combat/targets'
 import { enemyPool, enemySnapshot } from '@/systems/enemies/state'
+import { fxSnapshot } from '@/systems/fx/state'
 import { playerVitals } from '@/systems/vitals'
 
 /**
@@ -159,6 +160,16 @@ export interface DebugHandle {
    */
   readonly enemies: ReturnType<typeof enemySnapshot>
   /**
+   * Live particles, camera trauma and hitstop.
+   *
+   * Sprint 2.6's whole output is things that exist for a fraction of a second, and a
+   * screenshot of a burst that never happened looks exactly like one taken between two
+   * bursts. These are the three numbers that say the effects actually fired — and `trauma`
+   * doubles as the assertion that matters most: it must be able to rise on a monitor and
+   * must never move the camera in a headset.
+   */
+  readonly fx: ReturnType<typeof fxSnapshot>
+  /**
    * Kill everything currently standing, through the real damage path.
    *
    * Scaffolding for the smoke test, and narrowly scoped on purpose: it does not clear the
@@ -292,6 +303,9 @@ export function installDebugHandle(): void {
     },
     get enemies() {
       return enemySnapshot()
+    },
+    get fx() {
+      return fxSnapshot()
     },
     slay: () => {
       let killed = 0

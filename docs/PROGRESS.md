@@ -12,7 +12,11 @@ sprint, before committing. The roadmap itself lives in [PLAN.md](PLAN.md).
 > Quest 3 pass. Sprint 2.4 — stealth & enemy awareness — is also desktop-green and awaiting
 > its Quest 3 pass. Sprint 2.5 — HUD overlays: enemy counter and explored-area map — is
 > desktop-green and awaiting its Quest 3 pass: both HUDs render correctly, the enemy counter
-> top-centre and the minimap bottom-left. Sprint 2.6 — hit feedback & VFX — is next.**
+> top-centre and the minimap bottom-left. Sprint 2.6 — hit feedback & VFX — is also
+> desktop-green and awaiting its Quest 3 pass: bolts leave a muzzle flash and a trail, hits
+> throw sparks, kills come apart in ash and dissolve, and the camera never moves in VR.
+> Epic 2 is complete on the desktop; Epic 3 — darkness, audio and horror direction — is next,
+> with four Quest 3 passes outstanding behind it.**
 >
 > **There is something in the dungeon now.** Open the door, walk down the passage into the
 > generated level, and a wave composed from the wave number comes looking for you: Goblin
@@ -55,7 +59,7 @@ sprint, before committing. The roadmap itself lives in [PLAN.md](PLAN.md).
 | | 2.3 Enemies, AI & wave loop | 🟡 Desktop green — Quest 3 pass outstanding |
 | | 2.4 Stealth & enemy awareness | ✅ Desktop green — Quest 3 pass outstanding |
 | | 2.5 HUD overlays: enemy counter & map | ✅ Desktop green — Quest 3 pass outstanding |
-| | 2.6 Hit feedback & VFX | ⬜ |
+| | 2.6 Hit feedback & VFX | ✅ Desktop green — Quest 3 pass outstanding |
 | **3 — Fear & Atmosphere** | 3.1 Darkness & lighting | ⬜ |
 | | 3.2 Spatial audio | ⬜ |
 | | 3.3 Horror direction | ⬜ |
@@ -1097,6 +1101,139 @@ Fixed after the first desktop pass:
   signed fractions of the visible frustum at that depth, derived from the camera's projection
   matrix each frame (works for both the desktop camera and the XR array camera), pulled in by
   a `SAFE_FRACTION` so a quad's own size never clips the edge it's anchored to.
+
+### ✅ Sprint 2.6 — Hit feedback & VFX
+
+**Verified on desktop:** typecheck clean · 666/666 unit tests · production build succeeds ·
+smoke test fires a held volley and samples the effect state *while it is firing* — particles
+in the air, camera trauma rising — then waits out the burn and checks both have gone back to
+zero. The wave screenshot shows a body coming apart in ash.
+
+**Not yet verified on the Quest 3.** The headset checklist is README item 18, and almost all
+of it is a judgement a monitor cannot make: whether a burst reads in a corridor lit by six
+torches without whiting out the thing you are fighting, whether the dissolve reads as a body
+burning away rather than blinking out — and, the one that beats everything else, whether
+anything at all moves the view.
+
+Delivered — the rules, all pure and unit-tested, none of them importing three.js:
+
+- `src/systems/fx/particles.ts` — the pool every spark, ember and ash fleck comes out of, and
+  the burst maths that throws them. Randomness is injected, so a test can assert the *shape*
+  of a burst rather than that something roughly happened. 12 tests.
+- `src/systems/fx/hitstop.ts` — the multiplier on how much time the simulation is handed when
+  a blow lands, and the rule that there is no such multiplier in VR. 7 tests.
+- `src/systems/fx/shake.ts` — trauma in, camera angles out, and zeros whenever `inVR`. 9 tests.
+- `src/systems/fx/dissolve.ts` — how dissolved a body is, from the phase it is in. 6 tests.
+- `src/systems/fx/signals.ts` — the ring buffer for the things worth drawing that are *not*
+  damage: a wand firing, and a bolt meeting stone. 4 tests.
+
+And the wiring:
+
+- `src/systems/FxDriver.tsx` — at `SystemOrder.Effects`: reads the damage buffer and the
+  signal buffer, turns both into bursts, trauma and hitstop, sheds a trail ember behind every
+  bolt in the air, then steps the pool and the shake.
+- `src/entities/Particles.tsx` — the whole pool as one additive instanced draw.
+- `src/entities/Enemies.tsx` — the dissolve shader, injected into three's standard material
+  with `onBeforeCompile` so a dissolving body is still lit by the torches around it.
+- `src/core/simulation.tsx` — hitstop, applied where the frame delta is handed to the loop.
+- `src/entities/PlayerRig.tsx` — screenshake, applied in the one function that places the
+  desktop camera.
+- `src/systems/CombatDriver.tsx` — publishes the muzzle flash and the wall impact. It does not
+  know what either looks like.
+- `src/core/debug.ts` — `__DCVR__.fx`: live particles, trauma and hitstop.
+
+Decisions made during the sprint:
+
+- **No screenshake and no hitstop in VR, and both rules live in the pure function.**
+  `sampleShake` returns zeros when `inVR` and `timeScale` returns 1, each with a test that
+  says so, rather than the callers remembering. Screenshake in a headset is one of the fastest
+  ways to make somebody ill; hitstop is subtler and just as wrong — the camera is the player's
+  head and it does *not* slow down with the world, so a stop arrives as the world lurching
+  under a head that kept moving, at the exact moment the player is swinging hardest. VR gets
+  the same information through haptics, the flash and the burst, none of which touch the
+  relationship between the head and the world. This is the sprint most likely to have that
+  rule broken by a later change, which is why it is enforced two layers down from the caller.
+- **Effects read what happened; nothing tells them.** `FxDriver` consumes the damage buffer
+  and the signal buffer, so the combat driver still contains no opinion about what a hit looks
+  like. The one thing it does publish is the muzzle flash, because a shot that hits nothing
+  produces no damage event and there is otherwise no evidence the weapon fired.
+- **Hitstop scales the delta rather than skipping steps.** Skipping banks time in the
+  accumulator and the loop then sprints to catch up, which is a lurch immediately after the
+  stop — the opposite of the intended effect. Scaling means the time was never accumulated,
+  so the world simply resumes.
+- **The stop is aged by real time, not scaled time.** Ageing it by the scaled delta would make
+  a 90ms stop last 90ms ÷ 0.15 — six times longer than it asked for, which is long enough to
+  read as the game hanging.
+- **Requests take the longest rather than the sum.** Three things dying on the same step is
+  one stop; summing them is a quarter of a second of slow motion every time a pack breaks.
+- **Trauma, squared, rather than a timer per source.** Sources add, trauma decays on its own,
+  and the offset is trauma². Half the trauma is a quarter of the shake, so a glancing hit is
+  almost imperceptible and a kill lands — from one number, with no per-source tuning.
+- **The shake is angular, not positional.** A camera shoved 5cm sideways in a two-metre
+  corridor puts its near plane through the wall; a camera rotated three degrees reads as the
+  same jolt and cannot end up inside anything.
+- **The shake is deterministic.** Summed sines rather than `Math.random`: a random offset per
+  frame is white noise, which reads as a buzz rather than a shock — and a shake that depends
+  on the RNG is a shake no test can pin.
+- **Bodies dissolve; they do not fade.** Fading opacity makes a body transparent, which means
+  it sorts against every other transparent surface, stops writing depth, and in a torch-lit
+  corridor reads as a ghost rather than as a thing arriving. A dissolve stays fully opaque —
+  fragments are there or discarded — and the burning edge gives it a direction, which is what
+  makes materialising and dying read as opposites rather than as one fade played backwards.
+- **The dissolve is injected into the standard material, not a `ShaderMaterial`.** The model
+  still wants to be lit by the torches around it, and the alternative is reimplementing three's
+  lighting. `customProgramCacheKey` is not optional here: without it three shares a compiled
+  program between the injected and plain variants, and the effect then applies to neither or
+  both depending on which compiled first.
+- **The noise is sampled in object space.** In world space the pattern stays put while the
+  body walks through it, so a corpse appears to dissolve *sideways* as it falls.
+- **A fresh corpse holds together for the first third of its time.** The fall is half of what
+  tells the player the thing is dead; a body that starts coming apart on the frame it dies
+  never reads as a corpse at all.
+- **The eyes and the halo still fade.** They are light rather than body, and light does not
+  crumble — which also means the last thing visible on a dying enemy is a pair of eyes going
+  out, which is the read this game wants.
+- **Sparks shrink rather than fade.** Additive geometry fading out passes through every
+  intermediate brightness, which in the dark reads as the spark smearing. One that shrinks
+  reads as a spark going out.
+- **Three legible tiers of impact.** An ordinary hit is a handful of element-coloured sparks,
+  a crit adds a white flare, a kill is a wide burst of ash. The player should know what they
+  did from the size of the burst before they have read the number — which matters most in a
+  pack, where several things are being hit and only one of them just died.
+- **A trail every third step, not every step.** Sixty particles a second per bolt, with five
+  in the air, is a third of the pool spent on trails; every third step still leaves a
+  continuous streak behind something crossing a room in a fifth of a second.
+- **The muzzle flash is a particle, not a light.** Creating and destroying a point light
+  recompiles every material it touches — the hitch the torch pool exists to avoid — and a wand
+  fires three times a second.
+
+Two things found in the smoke test, both in the test rather than the game:
+
+- **The "particles never retired" failure was the burn doing its job.** Fire leaves a
+  three-second burning status that ticks damage through the same path a bolt does, so it keeps
+  producing perfectly legitimate impact bursts long after the shooting stops. The idle check
+  now waits the burn out.
+- **The enemy-approach check had been failing since Sprint 2.4, and not for a reason in this
+  sprint.** Its 45-second window was written against 2.3's two-second `HUNT_DELAY`; 2.4
+  replaced that with a 30-second safety valve, and a headless player standing still falls
+  straight through to it. Thirty *simulated* seconds is well over a minute of wall clock under
+  SwiftShader, because `MAX_FRAME_DELTA` clamps each of those long frames to 0.25s of
+  simulation. The window is now 150s, with the arithmetic written down next to it.
+
+Known scaffolding, and the gaps:
+
+- **Still no CC0 art kit**, so the dissolve burns away a capsule. The shader is on the
+  material rather than the mesh, so a real model inherits it unchanged.
+- **No impact decals and no lingering smoke.** Both want a lifetime longer than a second and
+  a different pool policy; neither is what makes a hit read.
+- **Audio is Sprint 3.2**, and it costs more here than anywhere: half of what makes an impact
+  feel heavy is the sound of it. Every effect in this sprint is currently silent.
+- The particle pool does not know about the light budget. **Sprint 3.1** owns that, and a
+  burst of additive geometry is the cheapest thing in this game to draw — but it is also the
+  thing most likely to be on screen when everything else is.
+- The enemy counter still ticks without animation, noted as a 2.6 polish item in 2.5's log.
+  Left alone deliberately: the HUD is not where this sprint's feedback belongs, and a counter
+  that animates competes with the burst that caused it.
 
 ## How to pick this up in a new session
 

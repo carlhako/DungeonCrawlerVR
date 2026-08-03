@@ -36,6 +36,8 @@ import {
   playerState,
 } from '@/systems/player'
 import { useSettings, type Settings } from '@/systems/settings'
+import { sampleShake, type ShakeOffset } from '@/systems/fx/shake'
+import { shakeState } from '@/systems/fx/state'
 import { xrInput } from '@/systems/xrInput'
 import { consumeTeleport } from '@/entities/Teleport'
 
@@ -138,6 +140,9 @@ export function PlayerRig() {
     </RigidBody>
   )
 }
+
+/** Written into every rendered frame by `sampleShake`, so the camera path allocates nothing. */
+const shakeOffset: ShakeOffset = { x: 0, y: 0, roll: 0 }
 
 interface ControllerProps {
   body: React.RefObject<RapierRigidBody | null>
@@ -354,13 +359,30 @@ function CharacterController({ body, collider, yawGroup, originGroup }: Controll
     if (!rigidBody) return
 
     const centre = rigidBody.translation()
+
+    /**
+     * Screenshake, and **only here** — this is the one function in the game that decides
+     * where the desktop camera goes, so it is the one place a shake can be applied without
+     * fighting whatever wrote the transform a moment earlier.
+     *
+     * `sampleShake` returns zeros inside a session, so this stays true even though the guard
+     * above already means the code is unreachable in VR. Two independent statements of the
+     * same rule, because it is the rule this project cares about most.
+     */
+    sampleShake(shakeState, shakeOffset, { inVR: latest.current.inSession })
+
     camera.position.set(
       centre.x,
       centre.y - PLAYER_CENTRE_OFFSET + DESKTOP_EYE_HEIGHT,
       centre.z,
     )
-    // YXZ so yaw is applied before pitch and the horizon never rolls.
-    scratch.euler.set(desktopInput.pitch, desktopInput.yaw, 0)
+    // YXZ so yaw is applied before pitch and the horizon never rolls — except by however much
+    // a shake is currently rolling it, which is the third component here and nowhere else.
+    scratch.euler.set(
+      desktopInput.pitch + shakeOffset.y,
+      desktopInput.yaw + shakeOffset.x,
+      shakeOffset.roll,
+    )
     camera.quaternion.setFromEuler(scratch.euler)
   })
 

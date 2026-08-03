@@ -14,12 +14,14 @@ import { GreyboxRoom } from '@/scenes/GreyboxRoom'
 import { XRDiagnostics } from '@/scenes/XRDiagnostics'
 import { CombatDriver } from '@/systems/CombatDriver'
 import { EnemyDriver } from '@/systems/EnemyDriver'
+import { FxDriver } from '@/systems/FxDriver'
 import { InteractionDriver } from '@/systems/InteractionDriver'
 import { RunDriver } from '@/systems/RunDriver'
 import { InteractPrompt } from '@/ui/InteractPrompt'
 import { DamageNumbers } from '@/ui/DamageNumbers'
 import { PlayerRig } from '@/entities/PlayerRig'
 import { Enemies } from '@/entities/Enemies'
+import { Particles } from '@/entities/Particles'
 import { Projectiles } from '@/entities/Projectiles'
 import { TeleportAim } from '@/entities/Teleport'
 import { DesktopWeaponRig } from '@/entities/WeaponRig'
@@ -114,6 +116,10 @@ function World() {
       <Enemies />
       <DesktopWeaponRig />
       <Projectiles />
+      {/* Effects run after combat has resolved: they read what happened rather than being
+          told, so nothing in the combat path knows what a hit looks like. */}
+      <FxDriver />
+      <Particles />
       <DamageNumbers />
       {/* Sprint 0.2's controller readout, kept only in the greybox now that the foyer has
           real things to point at. It is still the fastest way to tell "the stick is dead"

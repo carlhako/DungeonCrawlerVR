@@ -366,7 +366,18 @@ async function nearestEnemy() {
 // It has to come to the player. An enemy that spawns and stays there is the failure mode of
 // every part of this sprint at once — aggro, line of sight, pathing or the nav bake.
 wave.approachFrom = await nearestEnemy()
-const approachDeadline = Date.now() + 45000
+/**
+ * Long enough for the stealth safety valve, measured in *headless* seconds.
+ *
+ * Sprint 2.4 replaced the flat 2-second `HUNT_DELAY` with three detection paths, the last of
+ * which is a 30-second last-resort timer — and a headless player standing still is precisely
+ * the case that falls through to it, since `detectionScale` shrinks with the player's speed.
+ * Thirty *simulated* seconds is far longer in wall clock here: SwiftShader frames take a good
+ * fraction of a second and `MAX_FRAME_DELTA` clamps each one to 0.25s of simulation, so the
+ * world runs at well under half real time. The old 45s window was written against 2.3's
+ * two-second timer and has been failing this check ever since 2.4 landed.
+ */
+const approachDeadline = Date.now() + 150000
 let closest = wave.approachFrom
 while (Date.now() < approachDeadline) {
   const now = await nearestEnemy()
@@ -530,6 +541,29 @@ foyer.saveAfterPurchase = shop.saveAfterEquip
  * their off hand, which is exactly the loadout this needs.
  */
 const readCombat = () => page.evaluate(() => window.__DCVR__?.combat ?? null)
+const readFx = () => page.evaluate(() => window.__DCVR__?.fx ?? null)
+
+/**
+ * Sprint 2.6's effects are things that exist for a fifth of a second.
+ *
+ * A single reading taken after a volley is a reading taken between two bursts, so the peak
+ * over a window is the only honest measurement — and it is the one that says the sparks, the
+ * trails and the shake actually fired rather than that the pool merely exists.
+ */
+async function peakFx(seconds) {
+  const peak = { particles: 0, trauma: 0, hitstop: 0 }
+  const deadline = Date.now() + seconds * 1000
+  while (Date.now() < deadline) {
+    const now = await readFx()
+    if (now) {
+      peak.particles = Math.max(peak.particles, now.particles)
+      peak.trauma = Math.max(peak.trauma, now.trauma)
+      peak.hitstop = Math.max(peak.hitstop, now.hitstop)
+    }
+    await page.waitForTimeout(60)
+  }
+  return peak
+}
 const readDummy = (id) =>
   page.evaluate(
     (want) => (window.__DCVR__?.damageables ?? []).find((d) => d.id === want) ?? null,
@@ -565,7 +599,9 @@ combat.plainBefore = await readDummy('dummy-plain')
 
 // Hold the left button. A wand fires while held, so this is one gesture, not a click-fest.
 await page.mouse.down({ button: 'left' })
-await page.waitForTimeout(1600)
+// Sampled while firing rather than after: muzzle flashes, trails and impact sparks all live
+// for a fraction of a second, and a reading taken once the shooting stops finds an empty pool.
+combat.fx = await peakFx(1.6)
 await page.mouse.up({ button: 'left' })
 await page.waitForTimeout(500)
 
@@ -575,6 +611,16 @@ combat.plainAfter = await readDummy('dummy-plain')
 // Mana has to come back on its own, or the weapon is a one-shot.
 await page.waitForTimeout(2500)
 combat.manaRecovered = (await readCombat())?.mana ?? null
+/**
+ * Nothing may be left over: particles that never retire fill a pool that then stops drawing
+ * anything, and trauma that never decays is a camera that shakes forever.
+ *
+ * Read only once the *burn* is out. Fire leaves a 3-second burning status that ticks damage
+ * through the same path a bolt does, so it keeps producing perfectly legitimate impact bursts
+ * for seconds after the shooting stops — which is what this check first reported as a leak.
+ */
+await page.waitForTimeout(4000)
+combat.fxIdle = await readFx()
 
 /**
  * The element, against a target that resists it.
@@ -1180,6 +1226,31 @@ if (!cbt.dummies?.length) {
   }
   if (!(cbt.melee?.swingSpeed > 0)) {
     failures.push(`the swing tracker never measured a swing: ${cbt.melee?.swingSpeed}`)
+  }
+
+  /**
+   * Sprint 2.6: the hits produce something to look at.
+   *
+   * A muzzle flash, a trail behind every bolt and sparks off whatever it meets are all
+   * particles, so a volley that produced none means the effect pipeline is not running at
+   * all — which renders exactly as well as one that is, since the bolts and the damage
+   * numbers were already there.
+   */
+  if (!(cbt.fx?.particles > 0)) {
+    failures.push(`firing produced no particles at all: ${JSON.stringify(cbt.fx)}`)
+  }
+  // Landing hits shakes the desktop camera. The headset never sees this — the rule lives in
+  // `sampleShake` and has its own unit test — but on a monitor trauma that never rises means
+  // nothing is feeding it.
+  if (!(cbt.fx?.trauma > 0)) {
+    failures.push(`landing hits added no camera trauma: ${JSON.stringify(cbt.fx)}`)
+  }
+  // And it all has to go away again.
+  if (cbt.fxIdle && cbt.fxIdle.particles > 0) {
+    failures.push(`particles never retired: ${cbt.fxIdle.particles} still live after 2.5s idle`)
+  }
+  if (cbt.fxIdle && cbt.fxIdle.trauma > 0) {
+    failures.push(`camera trauma never decayed: ${cbt.fxIdle.trauma}`)
   }
 }
 
