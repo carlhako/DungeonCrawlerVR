@@ -11,7 +11,7 @@
 
 import { useEffect, useMemo, useRef } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
-import { CanvasTexture, DoubleSide, Mesh, MeshBasicMaterial, PlaneGeometry } from 'three'
+import { CanvasTexture, DoubleSide, Mesh, MeshBasicMaterial, PlaneGeometry, Quaternion, Vector3 } from 'three'
 
 export interface HudCanvasSize {
   width: number
@@ -63,10 +63,16 @@ export function HudOverlay({
     }
   }, [geometry, material, texture])
 
-  // Reusable scratch vectors for the per-frame position update.
+  // Reusable scratch objects for the per-frame update.
   const scratchRight = useMemo(() => ({ x: 0, y: 0, z: 0 }), [])
   const scratchUp = useMemo(() => ({ x: 0, y: 0, z: 0 }), [])
   const scratchForward = useMemo(() => ({ x: 0, y: 0, z: 0 }), [])
+  // PlaneGeometry faces +Z; the camera looks along -Z. Rotate 180° around Y so the
+  // quad's front face points toward the viewer rather than away from them.
+  const flipY = useMemo(
+    () => new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), Math.PI),
+    [],
+  )
 
   useFrame(() => {
     const dome = mesh.current
@@ -75,7 +81,10 @@ export function HudOverlay({
     const head = gl.xr.isPresenting ? gl.xr.getCamera() : camera
 
     dome.position.copy(head.position)
-    dome.quaternion.copy(head.quaternion)
+    // Copy head orientation then rotate 180° around local Y so the quad's +Z face
+    // (the visible front of a PlaneGeometry) points toward the camera rather than
+    // away from it.
+    dome.quaternion.copy(head.quaternion).multiply(flipY)
 
     // Apply head-local offset rotated into world space.
     const q = head.quaternion
