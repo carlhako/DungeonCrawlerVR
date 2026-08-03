@@ -3,7 +3,7 @@ import { CanvasTexture, Group, LinearFilter, Mesh, SRGBColorSpace, Vector3 } fro
 import { SystemOrder } from '@/core/loop'
 import { useFixedUpdate } from '@/core/simulation'
 import { useGame } from '@/systems/game'
-import { interactionState, registerInteractable, type Interactable } from '@/systems/interaction'
+import { interactionState } from '@/systems/interaction'
 import {
   IDLE_RESET,
   armSecondsLeft,
@@ -15,6 +15,7 @@ import {
 import { useRun } from '@/systems/run'
 import { useShop } from '@/systems/shop'
 import { STARTING_GOLD } from '@/systems/save'
+import { syncPanelButtons, type PanelRegistration } from '@/ui/panelButtons'
 
 /**
  * The "new game" plaque: a small board on the back wall that wipes progression.
@@ -39,11 +40,9 @@ const PLAQUE_HEIGHT = 0.44
 
 /** The one button, in plaque-local metres, origin at the centre. */
 const BUTTON = { cx: 0, cy: -0.1, w: 0.56, h: 0.14 }
+const BUTTON_ID = 'reset-game'
 
 const PIXELS_PER_METRE = 768
-
-/** Matches the shop board: how far in front a hand still counts as touching. */
-const TOUCH_DEPTH = 0.06
 
 const FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif'
 
@@ -96,44 +95,32 @@ export function ResetPlaque({ position, rotation = 0 }: ResetPlaqueProps) {
     [],
   )
 
-  const item = useMemo<Interactable>(
-    () => ({
-      id: 'reset-game',
-      position: { x: 0, y: 0, z: 0 },
-      radius: Math.min(BUTTON.w, BUTTON.h) / 2,
-      surface: {
-        right: { x: 1, y: 0, z: 0 },
-        up: { x: 0, y: 1, z: 0 },
-        normal: { x: 0, y: 0, z: 1 },
-        halfWidth: BUTTON.w / 2,
-        halfHeight: BUTTON.h / 2,
-        depth: TOUCH_DEPTH,
-      },
-      label: resetPrompt(IDLE_RESET),
-      enabled: true,
-      // Like the shop buttons: standing near a wall is not a statement about wanting to
-      // wipe your save. This one has to be aimed at or touched, deliberately.
-      proximity: false,
-      onActivate: () => {
-        const { next, wipe } = pressReset(state.current, scratch.now)
-        state.current = next
-        if (!wipe) return
-        useGame.getState().resetSave()
-        // The run machine holds the wave number it read at the start of the run, and the
-        // shop holds a selection and a message about a purchase that no longer happened.
-        useRun.getState().reset()
-        useShop.getState().clearFeedback()
-      },
-    }),
+  const registrations = useMemo(() => new Map<string, PanelRegistration>(), [])
+
+  /** One press. Whether it arms the plaque or fires it is `pressReset`'s decision. */
+  const activate = useMemo(
+    () => () => {
+      const { next, wipe } = pressReset(state.current, scratch.now)
+      state.current = next
+      if (!wipe) return
+      useGame.getState().resetSave()
+      // The run machine holds the wave number it read at the start of the run, and the shop
+      // holds a selection and a message about a purchase that no longer happened.
+      useRun.getState().reset()
+      useShop.getState().clearFeedback()
+    },
     [scratch],
   )
 
-  useEffect(() => registerInteractable(item), [item])
-
   useEffect(() => {
+    const live = registrations
     const { texture } = surface
-    return () => texture.dispose()
-  }, [surface])
+    return () => {
+      for (const { unregister } of live.values()) unregister()
+      live.clear()
+      texture.dispose()
+    }
+  }, [registrations, surface])
 
   useFixedUpdate((_dt, elapsed) => {
     const node = group.current
@@ -150,12 +137,24 @@ export function ResetPlaque({ position, rotation = 0 }: ResetPlaqueProps) {
     const busy = phase === 'loading' || phase === 'wave'
     const look: PlaqueLook = busy ? 'locked' : state.current.phase
 
-    placeButton(node, item, scratch)
-    item.enabled = !busy
-    item.label = busy ? 'Not while a wave is running' : resetPrompt(state.current)
+    syncPanelButtons(
+      node,
+      registrations,
+      [
+        {
+          id: BUTTON_ID,
+          rect: BUTTON,
+          prompt: busy ? 'Not while a wave is running' : resetPrompt(state.current),
+          enabled: !busy,
+        },
+      ],
+      1,
+      scratch,
+      activate,
+    )
 
     const marker = highlight.current
-    if (marker) marker.visible = !busy && interactionState.focus?.id === item.id
+    if (marker) marker.visible = !busy && interactionState.focus?.id === BUTTON_ID
 
     const secondsLeft = armSecondsLeft(state.current, elapsed)
     const signature = `${look}~${secondsLeft}`
@@ -188,45 +187,6 @@ export function ResetPlaque({ position, rotation = 0 }: ResetPlaqueProps) {
       </mesh>
     </group>
   )
-}
-
-/**
- * Keep the interactable on the button, in world space.
- *
- * Same approach as the shop board: the axes come from the plaque's own matrix rather than
- * from the yaw prop, so the button stays on the button if this is ever hung on something
- * that moves.
- */
-function placeButton(
-  node: Group,
-  item: Interactable,
-  scratch: { local: Vector3; right: Vector3; up: Vector3; normal: Vector3 },
-): void {
-  node.updateWorldMatrix(true, false)
-  const { local, right, up, normal } = scratch
-  node.matrixWorld.extractBasis(right, up, normal)
-  right.normalize()
-  up.normalize()
-  normal.normalize()
-
-  // Slightly proud of the face, so a hand meets the button rather than the board behind it.
-  local.set(BUTTON.cx, BUTTON.cy, 0.04)
-  node.localToWorld(local)
-  item.position.x = local.x
-  item.position.y = local.y
-  item.position.z = local.z
-
-  const surface = item.surface
-  if (!surface) return
-  surface.right.x = right.x
-  surface.right.y = right.y
-  surface.right.z = right.z
-  surface.up.x = up.x
-  surface.up.y = up.y
-  surface.up.z = up.z
-  surface.normal.x = normal.x
-  surface.normal.y = normal.y
-  surface.normal.z = normal.z
 }
 
 // ---------------------------------------------------------------------------

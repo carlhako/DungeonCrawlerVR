@@ -427,8 +427,32 @@ await page.goto(URL, { waitUntil: 'networkidle' })
 await page.waitForFunction(() => window.__DCVR__?.player != null, { timeout: 15000 })
 await page.waitForTimeout(500)
 
+/**
+ * The settings board, first: it shares the foyer visit with the reset plaque, and the pair
+ * of them are the point of Sprint 1.4 — every control in a headset has to be *in the room*.
+ */
+const settings = {}
+const readSettings = () => page.evaluate(() => window.__DCVR__?.settings ?? null)
+settings.before = await readSettings()
+
+await page.evaluate(() => window.__DCVR__.lookAt(-1.95, 1.5, -5.82))
+settings.walkOver = await walkUntil(['KeyW'], (p) => p.z < -3.9, 12)
+settings.teleportFocus = await pressButton('set-locomotion-teleport')
+settings.afterTeleport = await readSettings()
+await pressButton('set-comfortVignette-down')
+await pressButton('set-snapTurnDegrees-up')
+settings.afterSteps = await readSettings()
+// Stored, not just held: a comfort option that does not survive a reload is one the player
+// has to set again every time they put the headset on.
+settings.persisted = await page.evaluate(() =>
+  JSON.parse(window.localStorage.getItem('dcvr.settings') ?? '{}').state ?? null,
+)
+settings.restoreFocus = await pressButton('set-defaults')
+settings.afterDefaults = await readSettings()
+
 const reset = {}
 reset.saveBefore = await readSave()
+reset.settingsBefore = await readSettings()
 // It is on the back wall, behind the spawn — so this also proves a player who turns around
 // can find it. The ray only reaches 3.5m, same as any other interactable.
 await page.evaluate(() => window.__DCVR__.lookAt(-2.6, 1.5, 5.82))
@@ -438,6 +462,7 @@ reset.armFocus = await pressButton('reset-game')
 reset.saveAfterArm = await readSave()
 reset.confirmFocus = await pressButton('reset-game')
 reset.saveAfterWipe = await readSave()
+reset.settingsAfterWipe = await readSettings()
 
 mkdirSync(OUT, { recursive: true })
 await page.screenshot({ path: `${OUT}/smoke.png` })
@@ -446,6 +471,7 @@ await browser.close()
 info.foyer = foyer
 info.shop = shop
 info.movement = movement
+info.settings = settings
 info.reset = reset
 
 const results = { ...info, consoleErrors }
@@ -659,6 +685,24 @@ else {
   }
 }
 
+const set = info.settings
+if (!set.teleportFocus || set.teleportFocus.id !== 'set-locomotion-teleport') {
+  failures.push('the settings board was never focused — is it on the wall by the door?')
+} else {
+  if (set.afterTeleport?.locomotion !== 'teleport') {
+    failures.push(`pressing Teleport did not change locomotion: ${set.afterTeleport?.locomotion}`)
+  }
+  if (set.afterSteps?.comfortVignette !== 0.65 || set.afterSteps?.snapTurnDegrees !== 45) {
+    failures.push(`steppers did not step cleanly: ${JSON.stringify(set.afterSteps)}`)
+  }
+  if (set.persisted?.locomotion !== 'teleport') {
+    failures.push('settings changed on the board did not reach localStorage')
+  }
+  if (set.afterDefaults?.locomotion !== 'smooth' || set.afterDefaults?.comfortVignette !== 0.7) {
+    failures.push(`Restore defaults left something behind: ${JSON.stringify(set.afterDefaults)}`)
+  }
+}
+
 const rst = info.reset
 if (!rst.armFocus || rst.armFocus.id !== 'reset-game') {
   failures.push('the reset plaque was never focused — is it registered on the back wall?')
@@ -679,6 +723,10 @@ if (!rst.armFocus || rst.armFocus.id !== 'reset-game') {
     failures.push(
       `reset left weapons behind: ${JSON.stringify(rst.saveAfterWipe?.weapons)}`,
     )
+  }
+  // Two stores, two lifetimes: wiping the run must never touch the player's comfort.
+  if (JSON.stringify(rst.settingsAfterWipe) !== JSON.stringify(rst.settingsBefore)) {
+    failures.push('wiping the save also changed the settings')
   }
   if (rst.saveAfterWipe?.wave !== 1 || rst.saveAfterWipe?.bestWave !== 0) {
     failures.push(

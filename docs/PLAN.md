@@ -143,6 +143,22 @@ Every sprint ends with a **testable build**. Sprints from 0.2 onward are verifie
 - Emberwand owned at start; two more weapons purchasable.
 - ✅ **Test:** start with 100 gold, buy and equip a weapon, watch gold decrement, reload the page and it's still owned and equipped.
 
+**Sprint 1.4 — In-world options & new game**
+- Added after the first headset passes on 1.3, which made the gap obvious: the comfort
+  settings could only be changed from the F2 dev panel — DOM, desktop-only, stripped from
+  production builds, and invisible the moment the headset takes over the page. A player who
+  needs teleport locomotion needs it *while wearing the headset*, having just been made ill.
+- **Settings board** on the foyer wall beside the door: locomotion, turn style, snap size,
+  turn speed, walk speed, comfort vignette, foveation, render scale, and Restore defaults.
+- **"New game" plaque** on the back wall: wipes gold, weapons, upgrades and wave counters.
+  Two presses — arm, then confirm — and it stands down on its own. Settings are untouched.
+- One shared registration path for every world-space panel (`src/ui/panelButtons.ts`), so a
+  button's pick shape and its drawn shape cannot drift apart. That drift is what made the
+  shop unusable in the headset on the first pass.
+- ✅ **Test:** in VR, switch to teleport from inside the headset and have it take effect
+  immediately and survive a reload; wipe the save from the plaque and confirm it takes two
+  presses, and that the comfort settings are *not* wiped with it.
+
 ---
 
 ### Epic 2 — Wave Combat Core

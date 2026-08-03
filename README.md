@@ -67,10 +67,24 @@ inert until you do. `Esc` releases it.
 Locomotion mode, turn style, speed and vignette strength all live in the F2 panel under
 **Movement**, and persist. See "Comfort" below.
 
+### Game options
+
+Comfort and display settings live on a **board in the foyer**, on the wall to the left of the
+door — in the world, so they work identically on desktop and in the headset. Locomotion, turn
+style, snap size, turn speed, walk speed, comfort vignette, foveation and render scale, plus
+Restore defaults. Everything persists, and the "new game" plaque never touches it.
+
+Render scale is the one setting that cannot apply immediately: WebXR allocates the swapchain
+once per session, so it lands on your next VR entry. The board says so.
+
 ### Dev keys
 
 - `F1` — frame/perf HUD
 - `F2` — live tuning panel (Movement, XR render, Lighting, Physics)
+
+`F2` is a *dev* panel: DOM-only, stripped from production builds, and invisible inside a VR
+session. It stays because it tunes things a player has no business setting — physics,
+lighting, collider display — and it is quicker at a desk. The foyer board is the real one.
 
 ### Scenes
 
@@ -147,9 +161,15 @@ Enter VR and confirm, in order:
     which must never steal the press. Buy something you can afford, put it in each hand in
     turn, and try to buy something you cannot — the refusal has to say why. Every purchase
     must survive a reload.
-12. **Starting over** — turn around. The "new game" plaque is on the back wall behind the
+12. **Settings** — the board on the wall left of the door. Point at **Teleport** and pull the
+    trigger: it should take effect immediately, without leaving VR. Step **Vignette** and
+    **Walk speed**; a stepper at the end of its range greys out rather than doing nothing.
+    **Render scale** says on the board that it applies on the next VR entry — check that it
+    does. **Restore defaults** puts everything back. Reload; your choices are still there.
+13. **Starting over** — turn around. The "new game" plaque is on the back wall behind the
     spawn. One press arms it and it says so; a second wipes gold, weapons and upgrades back
-    to a first launch. Leave it armed and walk away — it must stand down by itself.
+    to a first launch. Leave it armed and walk away — it must stand down by itself. Then
+    check the settings board: your comfort options must *not* have been wiped with it.
 
 ### Comfort
 
@@ -257,6 +277,11 @@ the next VR entry.
   The pointer beam hangs off that same space rather than being positioned from it: a tracked
   pose read from `matrixWorld` is a frame old, and a beam a frame behind the hand reads as a
   second beam trailing the first. Parent to a pose, don't chase it.
+- **In-game UI is world-space, always** (`src/ui/panelButtons.ts`). The shop, the settings
+  board and the reset plaque are all canvas textures with their buttons registered as the
+  rectangles they are drawn as, through one shared path — because a button's pick shape
+  drifting from its drawn shape is exactly what made the shop unusable in a headset. DOM is
+  reserved for the pre-session entry button and the dev panels.
 - **The one destructive control takes two presses** (`src/systems/reset.ts`). Wiping the
   save is the only thing here that cannot be earned back, and the player's entire vocabulary
   is "point at a thing and pull the trigger" — one twitch. The plaque arms, says what the

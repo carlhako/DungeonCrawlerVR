@@ -7,19 +7,23 @@ sprint, before committing. The roadmap itself lives in [PLAN.md](PLAN.md).
 
 ## Current position
 
-> **Sprint 1.3 is signed off on the Quest 3. Epic 1 is complete and verified.**
+> **Sprint 1.3 is signed off on the Quest 3. Sprint 1.4 — in-world options and a new-game
+> plaque — is built and awaiting its headset pass.**
 >
-> Three headset passes each found something — spherical picking on flat buttons, a duplicate
-> pointer aimed from the wrong pose, a beam a frame behind the hand — and all of it is fixed
-> and checked in the headset. A "new game" plaque on the foyer's back wall wipes progression
-> when you want to start over.
+> Three headset passes on the shop each found something — spherical picking on flat buttons,
+> a duplicate pointer aimed from the wrong pose, a beam a frame behind the hand — and all of
+> it is fixed and checked in the headset.
 >
-> Epic 1 is now complete end to end: start with 100 gold, buy and equip a weapon at a board
-> on the shop counter, open the door, clear a wave, come back richer and spend it. All of it
-> survives a reload.
+> Sprint 1.4 closes the last thing in Epic 1 that only existed on desktop: the comfort
+> settings, which lived in a DOM dev panel that vanishes the moment the headset takes over
+> the page. They are now a board on the foyer wall, next to a plaque that starts a new game.
 >
-> Next after sign-off is **Epic 2 — Wave Combat Core**, starting with **Sprint 2.1 —
-> Procedural dungeon generation**. That is where the wave stops being a walk into an empty
+> Epic 1 is otherwise complete end to end: start with 100 gold, buy and equip a weapon at a
+> board on the shop counter, open the door, clear a wave, come back richer and spend it. All
+> of it survives a reload.
+>
+> Next, once 1.4 passes in the headset, is **Epic 2 — Wave Combat Core**, starting with
+> **Sprint 2.1 — Procedural dungeon generation**. That is where the wave stops being a walk into an empty
 > passage and the CC0 tile kit finally lands.
 
 ---
@@ -34,6 +38,7 @@ sprint, before committing. The roadmap itself lives in [PLAN.md](PLAN.md).
 | **1 — Foyer & Meta Loop** | 1.1 Foyer scene & interaction | ✅ Done |
 | | 1.2 Game state & persistence | ✅ Done |
 | | 1.3 Shop & weapon dialog | ✅ Verified on Quest 3 |
+| | 1.4 In-world options & new game | 🟨 Built — awaiting headset pass |
 | **2 — Wave Combat Core** | 2.1 Procedural dungeon generation | ⬜ Next |
 | | 2.2 Weapon & attack framework | ⬜ |
 | | 2.3 Enemies, AI & wave loop | ⬜ |
@@ -445,13 +450,6 @@ Delivered:
 - `src/systems/interaction.ts` — a `proximity` opt-out, a corrected focus precedence, and
   rectangular (`surface`) picking for anything flat.
 - `src/ui/PointerBeam.tsx` — the line out of each controller that shows where you are aiming.
-- `src/systems/reset.ts` + `src/ui/ResetPlaque.tsx` — the "new game" plaque, added after
-  sign-off. A board on the foyer's back wall that wipes gold, weapons, upgrades and wave
-  counters back to a first launch. **Two presses:** the first arms it and says what the
-  second one will do, and it stands down on its own after six seconds. Settings are not
-  touched — comfort options are about the person, not the run. 10 tests on the arming
-  machine, and a smoke step whose central assertion is that the *first* press changes
-  nothing at all.
 
 Decisions made during the sprint:
 
@@ -483,6 +481,75 @@ Decisions made during the sprint:
   visible flash, the message strip and the haptic click stand in for it. `__DCVR__.lookAt`
   exists because headless Chromium has no pointer lock, and without it the shop — which
   necessarily faces the room from behind the counter — could not be tested outside a headset.
+
+### 🟨 Sprint 1.4 — In-world options & new game
+
+Not in the original plan. It was added the moment the question "how do I get to game
+options?" had no good answer: they were in the **F2 dev panel** — DOM, desktop-only, stripped
+from production builds, and gone the instant the headset takes over the page. Which meant a
+player who discovered they needed teleport locomotion had to take the headset off, press a
+key, and put it back on, *after* being made ill once. A comfort setting that can only be
+changed outside VR is not a comfort setting.
+
+So both remaining out-of-world controls became things in the room, the same way the shop did.
+
+**Verified on desktop:** typecheck clean · 268/268 unit tests · production build succeeds ·
+smoke test walks to the settings board, switches to teleport, steps two values, checks the
+change reached `localStorage`, restores the defaults — then walks to the plaque and presses
+it twice, asserting the save is untouched after the first press and reset after the second,
+with the settings not wiped along with it.
+
+**Awaiting a Quest 3 pass.** What to check, in the headset:
+
+1. **The settings board** is on the wall left of the door, readable from where you spawn.
+   Point at **Teleport** and pull the trigger. The choice should go green, and the change
+   should be live *immediately* — push the left stick forward and you should be aiming an
+   arc, without leaving VR.
+2. Step **Vignette** and **Walk speed** up and down. Values change on the board as you press,
+   and a stepper at the end of its range greys out rather than doing nothing silently.
+3. **Render scale** says on the board that it applies on your next VR entry — because the
+   swapchain is allocated once per session, and a button that visibly does nothing is
+   indistinguishable from a broken one. Change it, leave VR, come back, and it should hold.
+4. **Restore defaults** puts everything back and then greys itself out.
+5. Reload the page. Every setting you chose is still chosen.
+6. **The new game plaque** is on the back wall, behind the spawn — turn around. One press
+   arms it and the board turns red and says what the next press does; a second wipes gold,
+   weapons and upgrades. Leave it armed and walk away: it must stand down by itself.
+7. **Wipe the save, then check the settings board.** Your comfort options must still be
+   exactly as you left them.
+
+Delivered:
+
+- `src/systems/settingsPanel.ts` — the board as a *layout*: settings in, buttons with
+  rectangles and states out. 18 tests, including that no two buttons overlap, none runs off
+  the board, and a stepper lands exactly on its limit rather than near it.
+- `src/ui/SettingsBoard.tsx` — the canvas board, on the wall beside the door.
+- `src/systems/reset.ts` + `src/ui/ResetPlaque.tsx` — the "new game" plaque and the arming
+  machine behind it. 10 tests.
+- `src/ui/panelButtons.ts` — one registration path shared by every world-space panel.
+- `src/core/debug.ts` — `__DCVR__.settings`, so the smoke test can assert the thing that
+  matters about two stores: wiping one does not touch the other.
+
+Decisions made during the sprint:
+
+- **The comfort settings go where you can see them from the spawn point**, beside the door,
+  not tucked away. They decide whether somebody can play at all; they are the last thing that
+  should need finding.
+- **The destructive control goes on the opposite wall.** A reset that shares a wall with the
+  door you use every run is a reset somebody presses by accident.
+- **Two presses for the wipe, one for everything else.** Nothing else in the game is
+  irreversible, and the player's entire vocabulary is "point and pull the trigger".
+- **The render-scale caveat is printed permanently, not shown as a message after a press.**
+  It was briefly a transient strip along the bottom of the board — which sat on top of the
+  Restore defaults button. A fact that is always true should always be on the wall.
+- **Stepped values are rounded to their step.** `0.7 - 0.05` is `0.6499999999999999`, and a
+  few presses of a 0.05 stepper leave a vignette that can never land back on zero: the "off"
+  button stays live forever and the board grows a tail of digits. There is a test for it.
+- **The third copy of "register these rectangles as interactables" became the only copy.**
+  The shop, the settings board and the plaque all do it, and a button's *pick* shape drifting
+  from its *drawn* shape is precisely what made the shop unusable on the first headset pass.
+- Known scaffolding: the F2 panel stays for now. It tunes things the player has no business
+  setting (physics, lighting, collider display), and it is still the faster tool at a desk.
 
 ---
 

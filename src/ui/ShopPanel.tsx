@@ -4,7 +4,7 @@ import { SystemOrder } from '@/core/loop'
 import { useFixedUpdate } from '@/core/simulation'
 import { WEAPONS, formatStat, weaponStats } from '@/data/weapons'
 import { useGame } from '@/systems/game'
-import { interactionState, registerInteractable, type Interactable } from '@/systems/interaction'
+import { interactionState } from '@/systems/interaction'
 import { ownsWeapon, type SaveData } from '@/systems/save'
 import {
   PANEL_HEIGHT,
@@ -14,6 +14,7 @@ import {
   type ShopButton,
   type ShopFeedback,
 } from '@/systems/shop'
+import { syncPanelButtons, type PanelRegistration } from '@/ui/panelButtons'
 
 /**
  * The weapon shop: a lit board standing on the counter.
@@ -54,16 +55,6 @@ const PIXELS_PER_METRE = 768
  * That is uncomfortable in VR and it makes you step backwards to read anything.
  */
 const PANEL_SCALE = 0.72
-
-/**
- * How far in front of the board a hand still counts as touching a button, in metres.
- *
- * The only tolerance a rectangular button has, and the only one it needs. The buttons are
- * picked as the rectangles they are drawn as (see `Interactable.surface`), so being generous
- * here cannot leak a press into the row below — which is exactly what the old spherical
- * pick did, with a reach of 16cm across rows 8cm apart.
- */
-const TOUCH_DEPTH = 0.06
 
 /** How long a purchase message stays up. Long enough to read, short enough not to nag. */
 const FEEDBACK_SECONDS = 3
@@ -117,10 +108,7 @@ export function ShopPanel({ position, rotation = 0 }: ShopPanelProps) {
    * player buys things, and re-rendering a subtree to move a handful of world positions is a
    * lot of machinery for something the fixed loop can do in a few lines.
    */
-  const registrations = useMemo(
-    () => new Map<string, { item: Interactable; unregister: () => void }>(),
-    [],
-  )
+  const registrations = useMemo(() => new Map<string, PanelRegistration>(), [])
   const scratch = useMemo(
     () => ({
       local: new Vector3(),
@@ -141,6 +129,21 @@ export function ShopPanel({ position, rotation = 0 }: ShopPanelProps) {
       texture.dispose()
     }
   }, [registrations, surface])
+
+  /**
+   * Press a button by id.
+   *
+   * The action is read fresh rather than captured: the button list is rebuilt as the save
+   * changes, and a press must not act on a layout from three purchases ago.
+   */
+  const activate = useMemo(
+    () => (id: string) => {
+      const shop = useShop.getState()
+      const match = shop.buttons(useGame.getState().save).find((b) => b.id === id)
+      if (match) shop.activate(match.action)
+    },
+    [],
+  )
 
   useFixedUpdate(() => {
     const node = group.current
@@ -178,7 +181,19 @@ export function ShopPanel({ position, rotation = 0 }: ShopPanelProps) {
     if (signature === scratch.signature) return
     scratch.signature = signature
 
-    syncButtons(node, registrations, buttons, scratch)
+    syncPanelButtons(
+      node,
+      registrations,
+      buttons.map((b) => ({
+        id: b.id,
+        rect: b.rect,
+        prompt: b.prompt,
+        enabled: b.state !== 'locked',
+      })),
+      PANEL_SCALE,
+      scratch,
+      activate,
+    )
     draw(surface.ctx, surface.canvas, save, buttons, shop.selected, shop.feedback)
     surface.texture.needsUpdate = true
   }, SystemOrder.Effects)
@@ -206,100 +221,6 @@ export function ShopPanel({ position, rotation = 0 }: ShopPanelProps) {
       </mesh>
     </group>
   )
-}
-
-/**
- * Bring the registered interactables in line with the current button list.
- *
- * Buttons keep stable ids across redraws, so an unchanged button keeps its registration and
- * the interaction focus doesn't flicker while the player is looking straight at it.
- */
-function syncButtons(
-  node: Group,
-  registrations: Map<string, { item: Interactable; unregister: () => void }>,
-  buttons: ShopButton[],
-  scratch: { local: Vector3; right: Vector3; up: Vector3; normal: Vector3 },
-): void {
-  node.updateWorldMatrix(true, false)
-  const seen = new Set<string>()
-
-  // The board's own axes, taken from the matrix rather than rebuilt from the yaw prop, so
-  // the buttons stay attached to the board if it is ever parented to something that moves.
-  const { local, right, up, normal } = scratch
-  node.matrixWorld.extractBasis(right, up, normal)
-  right.normalize()
-  up.normalize()
-  normal.normalize()
-
-  for (const button of buttons) {
-    seen.add(button.id)
-    // Slightly proud of the surface, so a hand reaching for a button meets it at the glass
-    // rather than having to push through the board.
-    local.set(button.rect.cx, button.rect.cy, 0.04)
-    node.localToWorld(local)
-
-    // Half-extents in world metres: the rect is in layout units and the group scales them.
-    const halfWidth = (button.rect.w / 2) * PANEL_SCALE
-    const halfHeight = (button.rect.h / 2) * PANEL_SCALE
-
-    const existing = registrations.get(button.id)
-    if (existing) {
-      existing.item.position.x = local.x
-      existing.item.position.y = local.y
-      existing.item.position.z = local.z
-      existing.item.label = button.prompt
-      existing.item.enabled = button.state !== 'locked'
-      const surface = existing.item.surface
-      if (surface) {
-        copy(surface.right, right)
-        copy(surface.up, up)
-        copy(surface.normal, normal)
-        surface.halfWidth = halfWidth
-        surface.halfHeight = halfHeight
-      }
-      continue
-    }
-
-    const item: Interactable = {
-      id: button.id,
-      position: { x: local.x, y: local.y, z: local.z },
-      // The pickable shape is the drawn rectangle — see `Interactable.surface`. `radius` only
-      // sizes the prompt that floats above it now.
-      radius: Math.min(halfWidth, halfHeight),
-      surface: {
-        right: { x: right.x, y: right.y, z: right.z },
-        up: { x: up.x, y: up.y, z: up.z },
-        normal: { x: normal.x, y: normal.y, z: normal.z },
-        halfWidth,
-        halfHeight,
-        depth: TOUCH_DEPTH,
-      },
-      label: button.prompt,
-      enabled: button.state !== 'locked',
-      proximity: false,
-      onActivate: () => {
-        // Read the action fresh: the button list is rebuilt as the save changes, and the
-        // closure must not act on a layout from three purchases ago.
-        const current = useShop.getState().buttons(useGame.getState().save)
-        const match = current.find((b) => b.id === button.id)
-        if (match) useShop.getState().activate(match.action)
-      },
-    }
-    registrations.set(button.id, { item, unregister: registerInteractable(item) })
-  }
-
-  for (const [id, registration] of registrations) {
-    if (seen.has(id)) continue
-    registration.unregister()
-    registrations.delete(id)
-  }
-}
-
-/** Write a three.js vector into a plain one, in place — these are read every fixed step. */
-function copy(target: { x: number; y: number; z: number }, source: Vector3): void {
-  target.x = source.x
-  target.y = source.y
-  target.z = source.z
 }
 
 // ---------------------------------------------------------------------------

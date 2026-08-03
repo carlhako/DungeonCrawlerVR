@@ -5,6 +5,7 @@ import { interactables, interactionState } from '@/systems/interaction'
 import { useRun, type RunEvent, type RunPhase } from '@/systems/run'
 import { useGame, type TransactionResult } from '@/systems/game'
 import { useShop } from '@/systems/shop'
+import { sanitiseSettings, useSettings, type Settings } from '@/systems/settings'
 import type { SaveData } from '@/systems/save'
 import type { WeaponId } from '@/data/weapons'
 
@@ -54,6 +55,13 @@ export interface DebugHandle {
   readonly save: SaveData
   /** What the shop panel is showing, and what it last said. */
   readonly shop: { selected: string; feedback: string | null; ok: boolean | null }
+  /**
+   * The live settings.
+   *
+   * Separate from `save` in exactly the way the two stores are: wiping progression must
+   * never touch someone's comfort options, and that is a claim worth being able to test.
+   */
+  readonly settings: Settings
   /** Drive a transition by hand, from the console or the smoke test. */
   send(event: RunEvent): boolean
   /**
@@ -118,6 +126,11 @@ export function installDebugHandle(): void {
     get shop() {
       const { selected, feedback } = useShop.getState()
       return { selected, feedback: feedback?.text ?? null, ok: feedback?.ok ?? null }
+    },
+    get settings() {
+      // Through `sanitiseSettings` because the store also holds its own actions, and this
+      // handle is a view of the data.
+      return sanitiseSettings(useSettings.getState())
     },
     send: (event) => useRun.getState().send(event),
     buyWeapon: (id) => useGame.getState().buyWeapon(id),
