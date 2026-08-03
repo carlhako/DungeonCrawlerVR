@@ -9,8 +9,10 @@ sprint, before committing. The roadmap itself lives in [PLAN.md](PLAN.md).
 
 > **Epics 0 and 1 are signed off on the Quest 3, and so are Sprints 2.1 and 2.2. Sprint 2.3 —
 > enemies, AI and the wave loop — is written and green on the desktop, and is waiting on a
-> Quest 3 pass. Sprint 2.4 — stealth & enemy awareness — is next, ahead of hit feedback &
-> VFX, which moves to 2.5.**
+> Quest 3 pass. Sprint 2.4 — stealth & enemy awareness — is also desktop-green and awaiting
+> its Quest 3 pass. Sprint 2.5 — HUD overlays: enemy counter and explored-area map — is
+> now desktop-green and awaiting its Quest 3 pass. Sprint 2.6 — hit feedback & VFX —
+> is next.**
 >
 > **There is something in the dungeon now.** Open the door, walk down the passage into the
 > generated level, and a wave composed from the wave number comes looking for you: Goblin
@@ -52,7 +54,8 @@ sprint, before committing. The roadmap itself lives in [PLAN.md](PLAN.md).
 | | 2.2 Weapon & attack framework | ✅ Verified on Quest 3 |
 | | 2.3 Enemies, AI & wave loop | 🟡 Desktop green — Quest 3 pass outstanding |
 | | 2.4 Stealth & enemy awareness | ✅ Desktop green — Quest 3 pass outstanding |
-| | 2.5 Hit feedback & VFX | ⬜ |
+| | 2.5 HUD overlays: enemy counter & map | 🟡 Desktop green — Quest 3 pass outstanding |
+| | 2.6 Hit feedback & VFX | ⬜ |
 | **3 — Fear & Atmosphere** | 3.1 Darkness & lighting | ⬜ |
 | | 3.2 Spatial audio | ⬜ |
 | | 3.3 Horror direction | ⬜ |
@@ -1010,6 +1013,73 @@ Decisions made during the sprint:
 - **Large rooms need no new code.** `hasLineOfSight` already sees further in open rooms, so
   crossing one unseen is naturally harder than a corridor — the detection scaling plays out
   correctly with no special cases.
+
+### 🟡 Sprint 2.5 — HUD overlays: enemy counter & explored-area map
+
+**Verified on desktop:** typecheck clean · 628/628 unit tests · production build succeeds.
+
+Delivered:
+
+- `src/systems/dungeon/explored.ts` — cell-level fog of war: which dungeon cells the player
+  has visited, stored as a packed-integer `Set`. Cleared when the dungeon is built or torn
+  down. The map renderer reads this to decide what to draw; it writes nothing itself. 19 tests.
+- `src/systems/ExploredDriver.tsx` — marks the cell the player stands on (plus immediate
+  neighbours) as explored each fixed step, at `SystemOrder.HUD`. Runs during `wave`,
+  `waveComplete` and `death` — any time the player is in the dungeon.
+- `src/ui/HudOverlay.tsx` — a head-locked canvas-textured quad, the shared foundation for
+  both Sprint 2.5 HUDs. Follows the XR camera in VR and the desktop camera otherwise, using
+  the same pattern as `ComfortVignette`. Draws a caller-supplied function every frame onto a
+  small offscreen canvas; the quad is positioned with a head-local offset so the caller
+  places it at top, bottom-left, or wherever it belongs.
+- `src/ui/EnemyCounter.tsx` — "killed / total" counter at the top centre of the view.
+  Reads the Wave Director's `killed` and `total` directly; only mounts during the `wave`
+  phase. Killed count drawn in gold for at-a-glance readability.
+- `src/ui/ExploredMap.tsx` — small north-up minimap at the bottom-left corner. Reads
+  the explored-cell set and draws floor cells as the player visits them; unvisited areas
+  stay dark. The player marker is a triangle that rotates to show body yaw. The map view
+  centres on the player and shows roughly a 12-cell radius.
+- Dungeon store (`src/systems/dungeon/store.ts`) now clears the explored set on `build`
+  and `clear`, so entering a new dungeon starts with a fresh map.
+
+Decisions made during the sprint:
+
+- **Head-locked 3D quads, not DOM.** A DOM overlay is invisible inside an immersive WebXR
+  session — the browser compositor does not draw HTML on top of the stereo render. A
+  head-locked quad parented to the camera works identically in both modes, and the pattern
+  was already proven by `ComfortVignette`.
+- **One `HudOverlay`, two HUDs.** The enemy counter and the map share a single foundation
+  component that handles head tracking, canvas creation, and positioning. The caller
+  provides size, offset, and a draw function — nothing else. Two screen-space HUDs that
+  each built their own head-locked mesh would diverge the first time one of them got the
+  render-order wrong.
+- **The HUD redraws every frame.** Both canvases are tiny (256×64 and 200×200) and the
+  drawing operations are a handful of filled rects and text. Caching the static portions
+  of the map (explored cells don't un-explore) would save microseconds on a canvas this
+  size — not worth the complexity of cache-invalidation when the explored set grows or
+  the dungeon changes.
+- **`SystemOrder.HUD` runs after combat and effects.** The explored driver needs the player's
+  final position for the step, and the counter reads director state that was updated during
+  the AI phase. Running at 550 puts it after everything that mutates state and before audio
+  (600), which doesn't exist yet.
+- **The map is north-up, not forward-up.** The spec says it does not rotate with the
+  player's heading. The quad itself is head-locked (follows the camera), but the map
+  content is drawn with a fixed world orientation — the arrow rotates, not the terrain.
+- **Radius-1 explore fill.** Marking the cell the player is on plus its immediate neighbours
+  means opening a door on a room fills the room rather than filling one cell. Torches light
+  a space; the map shows what the player could reasonably have seen.
+
+Known gaps:
+
+- The map resolution is low (4px/cell, 200×200 canvas). A larger dungeon shows more area
+  but at lower detail; room labels and a zoom/scale function belong with the wrist-mounted
+  diegetic HUD in Sprint 4.4.
+- The enemy counter has no animation — the number ticks immediately. A brief flash or
+  count-up is a feel polish item for Sprint 2.6 or later.
+- The HUD quads have no visibility toggle or opacity setting. A player who wants them off
+  entirely (immersion preference) needs a setting — the settings board already has a row
+  budget, so this is straightforward to add when asked.
+- Noise pulses (Sprint 2.4) and the explored driver share the same fixed step but don't
+  interact — they don't need to. The explored set is purely a map concern.
 
 ## How to pick this up in a new session
 

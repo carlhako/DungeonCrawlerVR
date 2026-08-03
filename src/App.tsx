@@ -24,6 +24,9 @@ import { Projectiles } from '@/entities/Projectiles'
 import { TeleportAim } from '@/entities/Teleport'
 import { DesktopWeaponRig } from '@/entities/WeaponRig'
 import { ComfortVignette } from '@/ui/ComfortVignette'
+import { EnemyCounter } from '@/ui/EnemyCounter'
+import { ExploredMap } from '@/ui/ExploredMap'
+import { ExploredDriver } from '@/systems/ExploredDriver'
 import { DesktopInputSampler } from '@/systems/DesktopInputSampler'
 import { XRInputSampler, XRRenderSettings } from '@/systems/XRInputSampler'
 import {
@@ -152,8 +155,11 @@ export function App() {
             <World />
           </Suspense>
 
-          {/* Outside <Physics>: it follows the head, not a rigid body. */}
+          {/* Outside <Physics>: they follow the head, not a rigid body. */}
           <ComfortVignette />
+          <EnemyCounter />
+          <ExploredMap />
+          <ExploredDriver />
           <DevPerf visible={showPerf} />
         </XR>
       </Canvas>

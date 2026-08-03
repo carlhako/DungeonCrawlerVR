@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { CELL_SIZE, cellToWorld, generate, type Cell, type DungeonMap } from './generate'
 import { bakeNav, type NavGrid } from './nav'
+import { clearExplored } from './explored'
 
 /**
  * The dungeon that currently exists, and where it is in the world.
@@ -46,6 +47,7 @@ export const useDungeon = create<DungeonStore>()((set) => ({
 
   build: (wave, entryAt) => {
     const map = generate(seedForWave(wave))
+    clearExplored()
     // Anchored on the *mouth*, not the entry: the mouth is the cell on the boundary that the
     // foyer's passage attaches to, and its outer edge has to land exactly on the opening.
     // Its centre is therefore half a cell further in.
@@ -59,7 +61,10 @@ export const useDungeon = create<DungeonStore>()((set) => ({
     return placement
   },
 
-  clear: () => set({ map: undefined, nav: undefined, offset: undefined }),
+  clear: () => {
+    clearExplored()
+    set({ map: undefined, nav: undefined, offset: undefined })
+  },
 }))
 
 /** A cell centre in world metres, for a placed dungeon. */

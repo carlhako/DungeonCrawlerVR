@@ -108,6 +108,7 @@ export const SystemOrder = {
   Physics: 300,
   Combat: 400,
   Effects: 500,
+  HUD: 550,
   Audio: 600,
 } as const
 

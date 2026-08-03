@@ -207,7 +207,19 @@ Every sprint ends with a **testable build**. Sprints from 0.2 onward are verifie
   sight still turn hostile; confirm a deliberately-hidden player still gets found eventually
   by the safety-valve timer rather than stalling the wave.
 
-**Sprint 2.5 — Hit feedback & VFX**
+**Sprint 2.5 — HUD overlays: enemy counter & map**
+- Enemy counter overlay, top of screen: killed / total for the current wave (e.g. `2 / 6`),
+  driven by the same Wave Director state that already tracks spawn and death counts.
+- Small explored-area map overlay, bottom-left corner. Static and screen-locked — it does not
+  rotate with the player's heading, only the player marker moves within it. Fills in as the
+  player explores rather than revealing the whole generated level up front.
+- Both are screen-space HUD, not world-space/diegetic, and both must render correctly in VR
+  (headset HUD/overlay layer) as well as desktop.
+- ✅ **Test:** clear a wave and watch the counter tick as each enemy dies; walk a level and
+  confirm the map only fills in the rooms and corridors actually visited, staying fixed in
+  orientation and corner throughout.
+
+**Sprint 2.6 — Hit feedback & VFX**
 - Impact sparks, ash/blood bursts, hit flash, brief hitstop, muzzle flash, projectile trails, dissolve-on-death shader.
 - Screenshake on desktop only (**never** in VR — it causes nausea); VR feedback is haptics + audio + visual flash instead.
 - Floating damage numbers billboarded in world space.
