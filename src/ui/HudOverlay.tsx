@@ -10,10 +10,12 @@ import { useFrame, useThree } from '@react-three/fiber'
 import {
   CanvasTexture,
   DoubleSide,
+  LinearFilter,
   Matrix4,
   Mesh,
   MeshBasicMaterial,
   PlaneGeometry,
+  SRGBColorSpace,
 } from 'three'
 
 export interface HudCanvasSize {
@@ -21,17 +23,27 @@ export interface HudCanvasSize {
   height: number
 }
 
+/**
+ * How far toward the edge of the view to sit, as a fraction of the visible frustum at
+ * `forwardMetres` — not a metre offset. `1` would touch the frustum edge exactly; `SAFE_FRACTION`
+ * below pulls every anchor in a bit so a quad's own size never clips it. This is what makes
+ * "top centre" and "bottom left" hold up across window resizes and the VR headset's FOV,
+ * where a fixed metre nudge does not: a HUD element positioned by a small constant offset
+ * drifts toward the centre of the view as the frustum widens, rather than tracking the edge.
+ */
+const SAFE_FRACTION = 0.85
+
 export function HudOverlay({
   sizeMetres,
   canvasSize,
-  offset,
+  anchor,
   renderOrder,
   draw,
 }: {
   sizeMetres: [number, number]
   canvasSize: HudCanvasSize
-  /** Head-local offset: right, up, forward (metres). */
-  offset: [number, number, number]
+  /** [x, y, forwardMetres]: x/y in [-1, 1] toward right/up edge of view; forward in metres. */
+  anchor: [number, number, number]
   renderOrder: number
   draw: (ctx: CanvasRenderingContext2D, width: number, height: number) => void
 }) {
@@ -45,6 +57,18 @@ export function HudOverlay({
     canvas.width = canvasSize.width
     canvas.height = canvasSize.height
     const tex = new CanvasTexture(canvas)
+    tex.colorSpace = SRGBColorSpace
+    tex.generateMipmaps = false
+    tex.minFilter = LinearFilter
+    tex.magFilter = LinearFilter
+
+    // Draw the very first frame so the texture isn't empty when it hits the GPU.
+    const ctx = canvas.getContext('2d')
+    if (ctx) {
+      draw(ctx, canvas.width, canvas.height)
+    }
+    tex.needsUpdate = true
+
     const mat = new MeshBasicMaterial({
       map: tex,
       transparent: true,
@@ -82,18 +106,32 @@ export function HudOverlay({
     headMatrix.decompose(dome.position, dome.quaternion, dome.scale)
     dome.scale.set(1, 1, 1)
 
-    // Rotate the head's forward vector into world space and offset.
+    // Rotate the local offset (right, up, forward) into world space.
     const q = dome.quaternion
-    const [ox, oy, oz] = offset
+    const [xFrac, yFrac, oz] = anchor
 
-    // Forward = local -Z; up = local +Y; right = local +X
+    // Derived from the projection matrix rather than a fixed FOV, so this holds for both
+    // the desktop camera and the XR array camera. For a symmetric perspective projection,
+    // elements[0]/[5] are the horizontal/vertical scale (cot(fov/2), and cot(fov/2)/aspect);
+    // the half-extent of the frustum at depth `d` in front of the camera is d / that scale.
+    const proj = head.projectionMatrix.elements
+    const halfW = Math.abs(oz) / proj[0]
+    const halfH = Math.abs(oz) / proj[5]
+    const ox = xFrac * halfW * SAFE_FRACTION
+    const oy = yFrac * halfH * SAFE_FRACTION
+
+    // `offset`'s forward component follows the local -Z-is-forward convention (matching
+    // the caller's comment), but `fwd` below is *already* that forward direction — so its
+    // contribution is `-oz * fwd`, not `oz * fwd`. Dropping the minus here once sent every
+    // HUD quad 1.5m behind the head instead of in front of it: correct geometry, correct
+    // material, invisible because it was outside the frustum entirely.
     const fwd = rotateVec(q, { x: 0, y: 0, z: -1 })
     const up = rotateVec(q, { x: 0, y: 1, z: 0 })
     const right = rotateVec(q, { x: 1, y: 0, z: 0 })
 
-    dome.position.x += right.x * ox + up.x * oy + fwd.x * oz
-    dome.position.y += right.y * ox + up.y * oy + fwd.y * oz
-    dome.position.z += right.z * ox + up.z * oy + fwd.z * oz
+    dome.position.x += right.x * ox + up.x * oy - fwd.x * oz
+    dome.position.y += right.y * ox + up.y * oy - fwd.y * oz
+    dome.position.z += right.z * ox + up.z * oy - fwd.z * oz
 
     // Draw the canvas content.
     const ctx = canvasEl.getContext('2d')

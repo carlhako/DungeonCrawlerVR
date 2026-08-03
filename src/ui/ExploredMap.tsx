@@ -15,7 +15,8 @@ import { HudOverlay } from '@/ui/HudOverlay'
 const CANVAS_W = 200
 const CANVAS_H = 200
 const SIZE_M: [number, number] = [0.18, 0.18]
-const OFFSET: [number, number, number] = [-0.18, -0.14, -1.2]
+// Bottom left: all the way toward the left edge and the bottom edge.
+const ANCHOR: [number, number, number] = [-1, -1, -1.2]
 const PX_PER_CELL = 4
 
 function draw(ctx: CanvasRenderingContext2D, w: number, h: number): void {
@@ -111,7 +112,7 @@ export function ExploredMap() {
     <HudOverlay
       sizeMetres={SIZE_M}
       canvasSize={{ width: CANVAS_W, height: CANVAS_H }}
-      offset={OFFSET}
+      anchor={ANCHOR}
       renderOrder={991}
       draw={draw}
     />

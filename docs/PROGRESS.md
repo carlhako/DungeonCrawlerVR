@@ -11,8 +11,8 @@ sprint, before committing. The roadmap itself lives in [PLAN.md](PLAN.md).
 > enemies, AI and the wave loop — is written and green on the desktop, and is waiting on a
 > Quest 3 pass. Sprint 2.4 — stealth & enemy awareness — is also desktop-green and awaiting
 > its Quest 3 pass. Sprint 2.5 — HUD overlays: enemy counter and explored-area map — is
-> now desktop-green and awaiting its Quest 3 pass. Sprint 2.6 — hit feedback & VFX —
-> is next.**
+> desktop-green and awaiting its Quest 3 pass: both HUDs render correctly, the enemy counter
+> top-centre and the minimap bottom-left. Sprint 2.6 — hit feedback & VFX — is next.**
 >
 > **There is something in the dungeon now.** Open the door, walk down the passage into the
 > generated level, and a wave composed from the wave number comes looking for you: Goblin
@@ -54,7 +54,7 @@ sprint, before committing. The roadmap itself lives in [PLAN.md](PLAN.md).
 | | 2.2 Weapon & attack framework | ✅ Verified on Quest 3 |
 | | 2.3 Enemies, AI & wave loop | 🟡 Desktop green — Quest 3 pass outstanding |
 | | 2.4 Stealth & enemy awareness | ✅ Desktop green — Quest 3 pass outstanding |
-| | 2.5 HUD overlays: enemy counter & map | 🟡 Desktop green — Quest 3 pass outstanding |
+| | 2.5 HUD overlays: enemy counter & map | ✅ Desktop green — Quest 3 pass outstanding |
 | | 2.6 Hit feedback & VFX | ⬜ |
 | **3 — Fear & Atmosphere** | 3.1 Darkness & lighting | ⬜ |
 | | 3.2 Spatial audio | ⬜ |
@@ -1014,9 +1014,10 @@ Decisions made during the sprint:
   crossing one unseen is naturally harder than a corridor — the detection scaling plays out
   correctly with no special cases.
 
-### 🟡 Sprint 2.5 — HUD overlays: enemy counter & explored-area map
+### ✅ Sprint 2.5 — HUD overlays: enemy counter & explored-area map
 
-**Verified on desktop:** typecheck clean · 628/628 unit tests · production build succeeds.
+**Verified on desktop:** typecheck clean · 628/628 unit tests · production build succeeds ·
+both HUDs render in a live wave, correctly positioned.
 
 Delivered:
 
@@ -1080,6 +1081,22 @@ Known gaps:
   budget, so this is straightforward to add when asked.
 - Noise pulses (Sprint 2.4) and the explored driver share the same fixed step but don't
   interact — they don't need to. The explored set is purely a map concern.
+
+Fixed after the first desktop pass:
+
+- **Both HUDs were invisible — a sign error, not a rendering bug.** `HudOverlay`'s head-local
+  offset composed the forward component as `fwd * oz` where `fwd` is already the world-space
+  forward direction and `oz` follows the same -Z-is-forward convention; the two negatives
+  should have cancelled and didn't, so every quad sat behind the camera instead of in front
+  of it. Correct geometry, correct material, correct texture — just outside the frustum.
+  Five commits chased this as a mesh/texture/orientation problem before the actual cause
+  turned up in the offset math.
+- **Fixed-metre placement doesn't mean "top" or "bottom-left."** A small constant nudge only
+  reads as an edge position at one particular FOV and window aspect; it drifts toward centre
+  as the frustum widens. `offset` became `anchor`: `[x, y, forwardMetres]` where x/y are
+  signed fractions of the visible frustum at that depth, derived from the camera's projection
+  matrix each frame (works for both the desktop camera and the XR array camera), pulled in by
+  a `SAFE_FRACTION` so a quad's own size never clips the edge it's anchored to.
 
 ## How to pick this up in a new session
 

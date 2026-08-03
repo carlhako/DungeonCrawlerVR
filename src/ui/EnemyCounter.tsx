@@ -12,7 +12,8 @@ import { HudOverlay } from '@/ui/HudOverlay'
 const CANVAS_W = 256
 const CANVAS_H = 64
 const SIZE_M: [number, number] = [0.4, 0.1]
-const OFFSET: [number, number, number] = [0, 0.2, -1.5]
+// Top centre: no horizontal lean, all the way up toward the top edge.
+const ANCHOR: [number, number, number] = [0, 1, -1.5]
 
 function draw(ctx: CanvasRenderingContext2D, w: number, h: number): void {
   const r = 8
@@ -61,7 +62,7 @@ export function EnemyCounter() {
     <HudOverlay
       sizeMetres={SIZE_M}
       canvasSize={{ width: CANVAS_W, height: CANVAS_H }}
-      offset={OFFSET}
+      anchor={ANCHOR}
       renderOrder={990}
       draw={draw}
     />
