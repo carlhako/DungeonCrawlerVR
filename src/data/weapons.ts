@@ -15,6 +15,8 @@
  * that when the shop shows "12 → 14" it is reading the same table the weapon will fire from.
  */
 
+import type { Element } from '@/data/elements'
+
 export type WeaponId = 'emberwand' | 'boneshard-staff' | 'frostbrand-sword'
 
 export type WeaponArchetype = 'wand' | 'melee' | 'offhand'
@@ -63,6 +65,23 @@ export interface WeaponDefinition {
   /** At upgrade level 0. `weaponStats` applies the levels the player has bought. */
   stats: WeaponStats
   upgrades: readonly UpgradeTrack[]
+  /**
+   * What this deals, and therefore what it leaves on the target. See `data/elements.ts`.
+   */
+  element: Element
+  /**
+   * Mana per attack. Melee is zero — swinging a sword is not a spell, and a blade that runs
+   * out of charge leaves the player holding nothing while something walks at them.
+   */
+  manaCost: number
+  /**
+   * Metres from the hand to the business end. Melee only.
+   *
+   * This is what the swing tracker measures the speed of and where the hit test happens: the
+   * *tip* moves several times faster than the fist does, and a sword that damages from the
+   * grip is one that hits things visibly to the side of the blade.
+   */
+  reach?: number
 }
 
 const STANDARD_UPGRADES: readonly UpgradeTrack[] = [
@@ -81,6 +100,11 @@ export const WEAPONS: Record<WeaponId, WeaponDefinition> = {
     blurb: 'Rapid arcing fire bolts. Forgiving, readable, yours already.',
     stats: { damage: 12, rate: 3.2, crit: 0.05 },
     upgrades: STANDARD_UPGRADES,
+    element: 'fire',
+    // Cheap on purpose. It is the weapon a player owns on their first launch, and running the
+    // starter dry in the first ten seconds teaches them that mana is a punishment rather than
+    // a resource.
+    manaCost: 6,
   },
   'boneshard-staff': {
     id: 'boneshard-staff',
@@ -91,6 +115,8 @@ export const WEAPONS: Record<WeaponId, WeaponDefinition> = {
     blurb: 'Hold to charge, release a cone of bone splinters.',
     stats: { damage: 44, rate: 0.9, crit: 0.08 },
     upgrades: STANDARD_UPGRADES,
+    element: 'physical',
+    manaCost: 28,
   },
   'frostbrand-sword': {
     id: 'frostbrand-sword',
@@ -101,6 +127,9 @@ export const WEAPONS: Record<WeaponId, WeaponDefinition> = {
     blurb: 'Chills on hit. Frozen things shatter.',
     stats: { damage: 28, rate: 1.6, crit: 0.1 },
     upgrades: STANDARD_UPGRADES,
+    element: 'frost',
+    manaCost: 0,
+    reach: 0.85,
   },
 }
 

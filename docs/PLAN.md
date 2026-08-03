@@ -173,7 +173,7 @@ Every sprint ends with a **testable build**. Sprints from 0.2 onward are verifie
 
 **Sprint 2.2 — Weapon & attack framework**
 - Hand-anchored weapon rigs (VR: attached to controllers; desktop: viewmodel with fluid idle/fire/reload animation).
-- Pooled projectiles, hitscan raycasts (via `three-mesh-bvh`), a unified damage pipeline (damage, element, status, crit, source).
+- Pooled projectiles, a unified damage pipeline (damage, element, status, crit, source). Projectiles are swept against a damageable registry and Rapier, not hitscan — `three-mesh-bvh` stays unused for now, and the case for it arrives with the enemy meshes in 2.3.
 - Velocity-based melee: controller speed → damage, with a swing cooldown so waggling isn't optimal; desktop equivalent swing animation with an active hitbox window.
 - Mana + cooldown resource system. Implement **Emberwand** and **Frostbrand Sword** end-to-end.
 - ✅ **Test:** shoot and swing at training dummies in the foyer; damage numbers, mana drain, and cooldowns behave in both modes.

@@ -2,6 +2,7 @@ import { Suspense } from 'react'
 import { XRControllerModel, XRSpace, useXRInputSourceStateContext } from '@react-three/xr'
 import type { Object3D } from 'three'
 import { setAim } from '@/systems/xrAim'
+import { VRWeaponRig } from '@/entities/WeaponRig'
 import { PointerBeam } from '@/ui/PointerBeam'
 
 /**
@@ -27,6 +28,15 @@ export function GameXRController() {
       <Suspense>
         <XRControllerModel />
       </Suspense>
+
+      {/* A blade is an extension of the fist, so it hangs off the grip pose and sticks out
+          along the controller's own body. A wand is *pointed*, so its rig is inside the
+          target-ray space below, on the same line as the beam — the distinction Sprint 1.3
+          learned the hard way when aiming down the grip pointed at the floor. */}
+      {(handedness === 'left' || handedness === 'right') && (
+        <VRWeaponRig handedness={handedness} mount="grip" />
+      )}
+
       <XRSpace
         space="target-ray-space"
         ref={(object: Object3D | null) => {
@@ -36,7 +46,10 @@ export function GameXRController() {
         {/* Parented, not positioned: the beam rides the tracked pose exactly, with no frame
             of lag between the line and the hand it comes out of. */}
         {(handedness === 'left' || handedness === 'right') && (
-          <PointerBeam handedness={handedness} />
+          <>
+            <PointerBeam handedness={handedness} />
+            <VRWeaponRig handedness={handedness} mount="ray" />
+          </>
         )}
       </XRSpace>
     </>

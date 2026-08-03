@@ -11,14 +11,20 @@ import {
   type DesktopInputSnapshot,
 } from './desktopInput'
 
+function button() {
+  return { value: 0, pressed: false, touched: false, justPressed: false, justReleased: false }
+}
+
 function snapshot(): DesktopInputSnapshot {
   return {
     move: { x: 0, y: 0 },
-    jump: { value: 0, pressed: false, touched: false, justPressed: false, justReleased: false },
+    jump: button(),
     sprint: false,
     yaw: 0,
     pitch: 0,
     pointerLocked: false,
+    attackMain: button(),
+    attackOff: button(),
   }
 }
 

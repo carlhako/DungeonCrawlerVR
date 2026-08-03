@@ -11,6 +11,8 @@ import { useDungeon, worldToPlacedCell } from '@/systems/dungeon/store'
 import { sanitiseSettings, useSettings, type Settings } from '@/systems/settings'
 import type { SaveData } from '@/systems/save'
 import type { WeaponId } from '@/data/weapons'
+import { combatSnapshot } from '@/systems/combat/state'
+import { damageables } from '@/systems/combat/targets'
 
 /**
  * Dev-only handle onto the running game, hung off `window.__DCVR__`.
@@ -118,6 +120,31 @@ export interface DebugHandle {
    * the far side of the counter — would be untestable outside a headset.
    */
   lookAt(x: number, y: number, z: number): void
+  /**
+   * Mana, cooldowns and what is in the air.
+   *
+   * The three things Sprint 2.2's acceptance test asks about that a screenshot cannot
+   * answer. A bolt is a 12cm sphere crossing the room in a fifth of a second; "did it fire"
+   * is not a question worth putting to a frame grab.
+   */
+  readonly combat: ReturnType<typeof combatSnapshot>
+  /**
+   * Every registered damageable and its health.
+   *
+   * The smoke test reads this to assert that a shot actually took health off a specific
+   * dummy — and, with the resistant one, that the *element* survived the trip from the
+   * weapon table to the target.
+   */
+  readonly damageables: Array<{
+    id: string
+    hp: number
+    maxHp: number
+    statuses: string[]
+    /** Where to stand and what to aim at, so the smoke test never hard-codes a layout. */
+    x: number
+    y: number
+    z: number
+  }>
 }
 
 /**
@@ -228,6 +255,20 @@ export function installDebugHandle(): void {
       // Yaw 0 looks down -Z, so the heading that points at (dx, dz) is atan2(-dx, -dz).
       desktopInput.yaw = Math.atan2(-dx, -dz)
       desktopInput.pitch = clampPitch(Math.atan2(dy, Math.hypot(dx, dz)))
+    },
+    get combat() {
+      return combatSnapshot()
+    },
+    get damageables() {
+      return damageables().map((target) => ({
+        id: target.id,
+        hp: Math.round(target.hp),
+        maxHp: target.maxHp,
+        statuses: target.statuses.map((status) => status.kind),
+        x: +target.position.x.toFixed(3),
+        y: +target.position.y.toFixed(3),
+        z: +target.position.z.toFixed(3),
+      }))
     },
   }
   ;(window as unknown as { __DCVR__: DebugHandle }).__DCVR__ = handle

@@ -393,6 +393,119 @@ foyer.purchase = { ok: shop.saveAfterBuy?.weapons.includes('frostbrand-sword') }
 foyer.saveAfterPurchase = shop.saveAfterEquip
 
 /**
+ * Sprint 2.2: shoot and swing at the training dummies.
+ *
+ * Driven through the real input path — mouse buttons, the same ones a player uses — rather
+ * than by calling into the combat systems. What this can prove headlessly is everything a
+ * screenshot cannot: that a bolt left the wand, that it crossed the room and found a target,
+ * that mana was actually spent, that the cooldown held the rate down, and that the *element*
+ * survived the trip from the weapon table to a resistant target.
+ *
+ * The player owns the Emberwand in their main hand and has just equipped the Frostbrand in
+ * their off hand, which is exactly the loadout this needs.
+ */
+const readCombat = () => page.evaluate(() => window.__DCVR__?.combat ?? null)
+const readDummy = (id) =>
+  page.evaluate(
+    (want) => (window.__DCVR__?.damageables ?? []).find((d) => d.id === want) ?? null,
+    id,
+  )
+
+const combat = {}
+combat.dummies = await page.evaluate(() => window.__DCVR__?.damageables ?? [])
+
+/** Positions come off the debug handle, so moving a dummy never silently skips a check. */
+const dummyAt = (id) => combat.dummies.find((d) => d.id === id)
+
+/** Face a dummy and close to `within` metres of it. */
+async function approachDummy(id, within) {
+  const at = dummyAt(id)
+  if (!at) return null
+  await page.evaluate((d) => window.__DCVR__.lookAt(d.x, d.y, d.z), at)
+  const stopped = await walkUntil(
+    ['KeyW'],
+    (p) => Math.hypot(p.x - at.x, p.z - at.z) < within,
+    20,
+  )
+  // Re-aim after arriving: the walk was aimed from where the player started.
+  await page.evaluate((d) => window.__DCVR__.lookAt(d.x, d.y, d.z), at)
+  await page.waitForTimeout(200)
+  return stopped
+}
+
+combat.walkOver = await approachDummy('dummy-plain', 2.2)
+
+combat.before = await readCombat()
+combat.plainBefore = await readDummy('dummy-plain')
+
+// Hold the left button. A wand fires while held, so this is one gesture, not a click-fest.
+await page.mouse.down({ button: 'left' })
+await page.waitForTimeout(1600)
+await page.mouse.up({ button: 'left' })
+await page.waitForTimeout(500)
+
+combat.afterVolley = await readCombat()
+combat.plainAfter = await readDummy('dummy-plain')
+
+// Mana has to come back on its own, or the weapon is a one-shot.
+await page.waitForTimeout(2500)
+combat.manaRecovered = (await readCombat())?.mana ?? null
+
+/**
+ * The element, against a target that resists it.
+ *
+ * The pipeline can be silently wrong here while everything still looks right: a bolt that
+ * lands and takes damage off proves nothing about whether `fire` reached `resolveDamage`.
+ * The soaked dummy resists fire by 60%, so the same number of hits must cost it visibly less
+ * health than the plain one.
+ */
+combat.walkToResistant = await approachDummy('dummy-fireproof', 2.2)
+
+const resistantBefore = await readDummy('dummy-fireproof')
+await page.mouse.down({ button: 'left' })
+await page.waitForTimeout(1600)
+await page.mouse.up({ button: 'left' })
+await page.waitForTimeout(400)
+const resistantAfter = await readDummy('dummy-fireproof')
+
+combat.resistant = {
+  before: resistantBefore,
+  after: resistantAfter,
+  lost: (resistantBefore?.hp ?? 0) - (resistantAfter?.hp ?? 0),
+}
+combat.plainLost = (combat.plainBefore?.hp ?? 0) - (combat.plainAfter?.hp ?? 0)
+
+/**
+ * And the blade, in the off hand.
+ *
+ * Desktop melee is an animated swing whose tip is measured by exactly the same speed rule
+ * the headset uses — there is no separate desktop damage path, which is the point. Walking
+ * right up to the dummy first: a sword has to be in reach of something.
+ */
+// As close as a 30cm capsule can get to a dummy on a 40cm base.
+combat.close = await approachDummy('dummy-fireproof', 1.0)
+const meleeBefore = await readDummy('dummy-fireproof')
+for (let i = 0; i < 4; i++) {
+  await page.mouse.down({ button: 'right' })
+  await page.waitForTimeout(80)
+  await page.mouse.up({ button: 'right' })
+  await page.waitForTimeout(500)
+}
+const meleeAfter = await readDummy('dummy-fireproof')
+combat.melee = {
+  before: meleeBefore,
+  after: meleeAfter,
+  lost: (meleeBefore?.hp ?? 0) - (meleeAfter?.hp ?? 0),
+  swingSpeed: (await readCombat())?.hands.off.swingSpeed ?? null,
+  // The tell that a *sword* landed, rather than the fire the wand left burning: only the
+  // Frostbrand can chill something. The first version of this check asked whether health
+  // went down, and passed for three whole runs on burn ticks alone while the blade was
+  // swinging straight over the top of the dummy.
+  chilled: (meleeAfter?.statuses ?? []).includes('chilled'),
+}
+await page.screenshot({ path: `${OUT}/smoke-combat.png` })
+
+/**
  * Now the greybox, for the movement course. It is the only room with a staircase, a ramp
  * and a ledge in it, and the character controller's behaviour is invisible without them.
  */
@@ -494,6 +607,7 @@ info.foyer = foyer
 info.shop = shop
 info.movement = movement
 info.dungeon = dungeon
+info.combat = combat
 info.settings = settings
 info.reset = reset
 
@@ -730,6 +844,56 @@ if (!dun.map) {
     failures.push(`too many live lights in the dungeon: ${dun.render?.lights}`)
   }
   if (dun.cleared) failures.push('the dungeon was still loaded after returning to the foyer')
+}
+
+// Sprint 2.2: the weapon and attack framework, at the training dummies.
+const cbt = info.combat
+if (!cbt.dummies?.length) {
+  failures.push('no training dummies registered — is the damageable registry mounted?')
+} else {
+  if (!cbt.before || cbt.before.hands.main.weapon !== 'emberwand') {
+    failures.push(`the main hand is not holding the wand: ${JSON.stringify(cbt.before?.hands)}`)
+  }
+  // A bolt actually landed. This is the sprint's whole premise.
+  if (!(cbt.plainLost > 0)) {
+    failures.push(
+      `holding the trigger took no health off the dummy: ${JSON.stringify(cbt.plainBefore)} -> ${JSON.stringify(cbt.plainAfter)}`,
+    )
+  }
+  // Mana was spent, and came back on its own. A weapon that costs nothing is not a
+  // resource system, and one that never refills is a one-shot.
+  if (!(cbt.afterVolley?.mana < cbt.before?.mana)) {
+    failures.push(`firing spent no mana: ${cbt.before?.mana} -> ${cbt.afterVolley?.mana}`)
+  }
+  if (!(cbt.manaRecovered > cbt.afterVolley?.mana)) {
+    failures.push(`mana did not regenerate: stuck at ${cbt.manaRecovered}`)
+  }
+  // The cooldown is what keeps the rate honest. 1.6s of held trigger on a 3.2/s weapon is
+  // about five bolts, so the damage taken must be a small multiple of one hit — not the
+  // ninety-odd a per-step fire would produce.
+  if (cbt.plainLost > 12 * 12) {
+    failures.push(`the wand fired far faster than its rate: ${cbt.plainLost} damage in 1.6s`)
+  }
+  // The element survived the trip. 60% fire resistance against the same volley.
+  if (!(cbt.resistant?.lost > 0)) {
+    failures.push('the fire-resistant dummy took no damage at all')
+  } else if (!(cbt.resistant.lost < cbt.plainLost)) {
+    failures.push(
+      `resistance had no effect: plain lost ${cbt.plainLost}, resistant lost ${cbt.resistant.lost}`,
+    )
+  }
+  // Melee, through the same speed rule as the headset. Chilled is the assertion that
+  // matters: it can only have come from the Frostbrand, so it cannot be satisfied by the
+  // burn the wand left behind.
+  if (!cbt.melee?.chilled) {
+    failures.push(`swinging the blade hit nothing: ${JSON.stringify(cbt.melee)}`)
+  }
+  if (!(cbt.melee?.lost > 0)) {
+    failures.push(`a landed swing took no health off: ${JSON.stringify(cbt.melee)}`)
+  }
+  if (!(cbt.melee?.swingSpeed > 0)) {
+    failures.push(`the swing tracker never measured a swing: ${cbt.melee?.swingSpeed}`)
+  }
 }
 
 const set = info.settings

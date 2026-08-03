@@ -4,6 +4,7 @@ import type { Mesh, MeshStandardMaterial, PointLight } from 'three'
 import { SystemOrder } from '@/core/loop'
 import { useFixedUpdate } from '@/core/simulation'
 import { Door } from '@/entities/Door'
+import { TrainingDummies } from '@/entities/TrainingDummy'
 import { registerInteractable, type Interactable } from '@/systems/interaction'
 import { flicker } from '@/systems/torch'
 import { useDungeon } from '@/systems/dungeon/store'
@@ -119,6 +120,12 @@ export function Foyer() {
 
       <Torches />
       <ShopCounter />
+
+      {/* Something to hit, in the one room that is safe to practise in. Deliberately on the
+          way to the door rather than in a corner: a player who has just bought a weapon
+          walks past these on their way out, which is exactly when they want to know what it
+          does. */}
+      <TrainingDummies />
     </group>
   )
 }

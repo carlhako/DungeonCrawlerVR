@@ -19,6 +19,7 @@ import {
   SETTING_LIMITS,
   SETTING_OPTIONS,
   type LocomotionMode,
+  type MainHand,
   type Settings,
   type TurnMode,
 } from '@/systems/settings'
@@ -33,6 +34,7 @@ export type SteppedSetting = keyof typeof SETTING_LIMITS
 export type SettingsAction =
   | { kind: 'locomotion'; value: LocomotionMode }
   | { kind: 'turn'; value: TurnMode }
+  | { kind: 'mainHand'; value: MainHand }
   | { kind: 'step'; setting: SteppedSetting; delta: 1 | -1 }
   | { kind: 'defaults' }
 
@@ -64,9 +66,23 @@ export interface SettingsRow {
   deferred?: boolean
 }
 
-const ROW_TOP = 0.3
-const ROW_PITCH = 0.088
-const ROW_HEIGHT = 0.072
+/**
+ * Nine rows now, on the same board.
+ *
+ * The main-hand row arrived in Sprint 2.2 — the weapon rigs need to know which controller is
+ * the dominant one, and the alternative was assuming right-handed, which puts every weapon a
+ * left-handed player buys into their weak hand. Fitting it meant tightening the pitch rather
+ * than growing the board: a panel large enough to need scanning is uncomfortable in VR, and
+ * the shop already taught that lesson at 0.72 scale.
+ *
+ * The row height was tightened with it, so the gap between two adjacent buttons stays wider
+ * than twice `SURFACE_TOUCH_MARGIN` — otherwise two rows' near-grab tolerances overlap and
+ * touching a button can pick its neighbour, which is exactly the defect that made the shop
+ * unusable on its first headset pass. There is a test for the gap.
+ */
+const ROW_TOP = 0.34
+const ROW_PITCH = 0.082
+const ROW_HEIGHT = 0.066
 
 /** Option buttons: two per row, filling the right-hand column. */
 const OPTION_W = 0.32
@@ -122,7 +138,12 @@ const OPTION_LABEL: Record<string, string> = {
   smooth: 'Smooth',
   teleport: 'Teleport',
   snap: 'Snap',
+  left: 'Left',
+  right: 'Right',
 }
+
+/** The option rows, in order. Stepped rows follow them. */
+const OPTION_ROWS = 3
 
 function optionLabel(value: string): string {
   return OPTION_LABEL[value] ?? value
@@ -132,12 +153,13 @@ export function settingsRows(settings: Settings): SettingsRow[] {
   const rows: SettingsRow[] = [
     { label: 'Locomotion', value: '', cy: rowY(0) },
     { label: 'Turning', value: '', cy: rowY(1) },
+    { label: 'Main hand', value: '', cy: rowY(2) },
   ]
   STEPPED_ROWS.forEach((row, index) => {
     rows.push({
       label: row.label,
       value: formatSetting(row.setting, settings[row.setting]),
-      cy: rowY(index + 2),
+      cy: rowY(index + OPTION_ROWS),
       deferred: row.setting === 'framebufferScale',
     })
   })
@@ -177,8 +199,24 @@ export function settingsButtons(settings: Settings): SettingsButton[] {
     })
   }
 
+  for (const value of SETTING_OPTIONS.mainHand) {
+    buttons.push({
+      id: `set-mainHand-${value}`,
+      action: { kind: 'mainHand', value },
+      rect: {
+        cx: OPTION_CX[value === 'left' ? 0 : 1],
+        cy: rowY(2),
+        w: OPTION_W,
+        h: ROW_HEIGHT,
+      },
+      label: optionLabel(value),
+      state: settings.mainHand === value ? 'done' : 'available',
+      prompt: `Hold your main weapon in your ${value} hand`,
+    })
+  }
+
   STEPPED_ROWS.forEach((row, index) => {
-    const cy = rowY(index + 2)
+    const cy = rowY(index + OPTION_ROWS)
     const current = settings[row.setting]
     const { min, max } = SETTING_LIMITS[row.setting]
     for (const delta of [-1, 1] as const) {
@@ -228,6 +266,8 @@ export function applySettingsAction(
       return settings.locomotion === action.value ? {} : { locomotion: action.value }
     case 'turn':
       return settings.turn === action.value ? {} : { turn: action.value }
+    case 'mainHand':
+      return settings.mainHand === action.value ? {} : { mainHand: action.value }
     case 'step': {
       const next = stepSetting(settings[action.setting], action.setting, action.delta)
       return next === settings[action.setting] ? {} : { [action.setting]: next }

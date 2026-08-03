@@ -4,7 +4,9 @@ import { useXR } from '@react-three/xr'
 import { SystemOrder } from '@/core/loop'
 import { useFixedUpdate } from '@/core/simulation'
 import {
+  ATTACK_BUTTONS,
   desktopInput,
+  mergeButtons,
   mergeTaps,
   releaseDesktopInput,
   sampleDesktopInput,
@@ -29,6 +31,10 @@ export function DesktopInputSampler() {
     mouseX: 0,
     mouseY: 0,
     locked: false,
+    buttons: new Set<number>(),
+    // Latched exactly like `tapped`: a click shorter than one fixed step is a click the
+    // player made, and dropping it feels like the game ignoring them.
+    clicked: new Set<number>(),
   })
 
   useEffect(() => {
@@ -73,8 +79,30 @@ export function DesktopInputSampler() {
       }
     }
 
+    const onMouseDown = (event: MouseEvent) => {
+      state.buttons.add(event.button)
+      state.clicked.add(event.button)
+    }
+    const onMouseUp = (event: MouseEvent) => state.buttons.delete(event.button)
+
+    // Right-click is the off-hand attack, so the context menu must not open on top of the
+    // game every time the player uses it.
+    const onContextMenu = (event: MouseEvent) => event.preventDefault()
+
+    // The very first click of a session is spent capturing the mouse, and must not also be
+    // an attack — otherwise starting to play always costs a shot, fired at whatever the
+    // camera happened to be pointing at. Only the first: after that the player is in the
+    // game and a click means what it says. `click` fires after `mousedown` in the same task,
+    // so the press this deletes has not been sampled yet.
+    let captured = false
+
     const onCanvasClick = () => {
       if (document.pointerLockElement === canvas) return
+      if (!captured) {
+        captured = true
+        state.buttons.delete(ATTACK_BUTTONS.main)
+        state.clicked.delete(ATTACK_BUTTONS.main)
+      }
       // Not awaited: a rejected request (the browser rate-limits repeated attempts) is not
       // an error worth surfacing — the player just clicks again.
       void canvas.requestPointerLock?.()
@@ -85,6 +113,8 @@ export function DesktopInputSampler() {
     const onBlur = () => {
       state.held.clear()
       state.tapped.clear()
+      state.buttons.clear()
+      state.clicked.clear()
       releaseDesktopInput(desktopInput)
     }
 
@@ -92,6 +122,9 @@ export function DesktopInputSampler() {
     window.addEventListener('keyup', onKeyUp)
     window.addEventListener('blur', onBlur)
     window.addEventListener('mousemove', onMouseMove)
+    window.addEventListener('mousedown', onMouseDown)
+    window.addEventListener('mouseup', onMouseUp)
+    window.addEventListener('contextmenu', onContextMenu)
     document.addEventListener('pointerlockchange', onPointerLockChange)
     canvas.addEventListener('click', onCanvasClick)
 
@@ -100,10 +133,15 @@ export function DesktopInputSampler() {
       window.removeEventListener('keyup', onKeyUp)
       window.removeEventListener('blur', onBlur)
       window.removeEventListener('mousemove', onMouseMove)
+      window.removeEventListener('mousedown', onMouseDown)
+      window.removeEventListener('mouseup', onMouseUp)
+      window.removeEventListener('contextmenu', onContextMenu)
       document.removeEventListener('pointerlockchange', onPointerLockChange)
       canvas.removeEventListener('click', onCanvasClick)
       state.held.clear()
       state.tapped.clear()
+      state.buttons.clear()
+      state.clicked.clear()
       releaseDesktopInput(desktopInput)
     }
   }, [canvas, inSession])
@@ -115,10 +153,12 @@ export function DesktopInputSampler() {
       mouseDeltaX: state.mouseX,
       mouseDeltaY: state.mouseY,
       pointerLocked: state.locked,
+      buttons: mergeButtons(state.buttons, state.clicked),
     })
     // Drain both: this input has been consumed, and leaving it would apply it again on the
     // next step — a single tap would read as a key held for two.
     state.tapped.clear()
+    state.clicked.clear()
     state.mouseX = 0
     state.mouseY = 0
   }, SystemOrder.Input)

@@ -26,16 +26,35 @@ export interface DesktopInputSnapshot {
   pitch: number
   /** False until the player clicks the canvas; without it, mouselook does nothing. */
   pointerLocked: boolean
+  /**
+   * Left mouse button: attack with the main hand. Right button: the off hand.
+   *
+   * Two buttons rather than one, because the loadout has two hands and desktop has to be able
+   * to express the same thing VR does — a wand in one hand and a blade in the other is the
+   * loadout the shop has been selling since Sprint 1.3, and a desktop player who can only use
+   * one of them is playing a different game.
+   */
+  attackMain: ButtonState
+  attackOff: ButtonState
+}
+
+function button(): ButtonState {
+  return { value: 0, pressed: false, touched: false, justPressed: false, justReleased: false }
 }
 
 export const desktopInput: DesktopInputSnapshot = {
   move: { x: 0, y: 0 },
-  jump: { value: 0, pressed: false, touched: false, justPressed: false, justReleased: false },
+  jump: button(),
   sprint: false,
   yaw: 0,
   pitch: 0,
   pointerLocked: false,
+  attackMain: button(),
+  attackOff: button(),
 }
+
+/** Which mouse button drives which hand. `MouseEvent.button` values. */
+export const ATTACK_BUTTONS = { main: 0, off: 2 } as const
 
 /** Multiplier on `moveSpeed` while sprint is held. */
 export const SPRINT_MULTIPLIER = 1.7
@@ -92,15 +111,22 @@ export function keyboardMove(held: ReadonlySet<string>): Vec2 {
  * you rather than like a bug. Latching the tap guarantees every press is seen for at least
  * one step, and the release edge follows on the next one.
  */
-export function mergeTaps(
-  held: ReadonlySet<string>,
-  tapped: ReadonlySet<string>,
-): Set<string> {
-  if (tapped.size === 0) return held as Set<string>
+export function mergeTaps<T>(held: ReadonlySet<T>, tapped: ReadonlySet<T>): Set<T> {
+  if (tapped.size === 0) return held as Set<T>
   const merged = new Set(held)
   for (const code of tapped) merged.add(code)
   return merged
 }
+
+/**
+ * The same latch, for mouse buttons.
+ *
+ * A separate name rather than calling `mergeTaps` at the call site, purely so that the
+ * reason it exists is stated where a reader of the sampler will find it: a click shorter
+ * than one fixed step is still a click, and dropping it is the bug Sprint 0.3 already fixed
+ * once for the jump key.
+ */
+export const mergeButtons = mergeTaps<number>
 
 /** Clamp pitch into the range where a first-person camera stays upright. */
 export function clampPitch(pitch: number): number {
@@ -132,6 +158,8 @@ export interface DesktopSampleInput {
   mouseDeltaX: number
   mouseDeltaY: number
   pointerLocked: boolean
+  /** `MouseEvent.button` values currently down, latched the same way keys are. */
+  buttons?: ReadonlySet<number>
 }
 
 /**
@@ -150,6 +178,14 @@ export function sampleDesktopInput(
 
   const jumping = anyHeld(input.held, JUMP_KEYS)
   applyButtonReading(snapshot.jump, { state: jumping ? 'pressed' : 'default' })
+
+  const buttons = input.buttons
+  applyButtonReading(snapshot.attackMain, {
+    state: buttons?.has(ATTACK_BUTTONS.main) ? 'pressed' : 'default',
+  })
+  applyButtonReading(snapshot.attackOff, {
+    state: buttons?.has(ATTACK_BUTTONS.off) ? 'pressed' : 'default',
+  })
 
   // Look only responds under pointer lock. Otherwise moving the mouse to reach the tuning
   // panel would spin the player around.
@@ -170,4 +206,9 @@ export function releaseDesktopInput(snapshot: DesktopInputSnapshot): void {
   snapshot.move = { x: 0, y: 0 }
   snapshot.sprint = false
   applyButtonReading(snapshot.jump, undefined)
+  // Same reasoning as `clearHand` in `xrInput`: a button that was down when the tab went
+  // away never gets its `mouseup`, and a weapon that keeps firing at nothing is worse than
+  // one that stops.
+  applyButtonReading(snapshot.attackMain, undefined)
+  applyButtonReading(snapshot.attackOff, undefined)
 }

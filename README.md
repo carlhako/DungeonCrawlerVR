@@ -51,6 +51,10 @@ inert until you do. `Esc` releases it.
 | Mouse | Look |
 | `Shift` | Sprint |
 | `Space` | Use, when a prompt is showing — otherwise jump |
+| Left mouse | Attack with your main hand — hold to keep a wand firing |
+| Right mouse | Attack with your off hand |
+
+The first click of a session is spent capturing the mouse and does not attack.
 
 ### VR controls
 
@@ -60,7 +64,8 @@ inert until you do. `Esc` releases it.
 | Right thumbstick | Turn — smooth by default, snap optional |
 | Right controller | Points the teleport arc |
 | Either controller | Points the interaction ray — one dim beam per hand shows where |
-| Trigger | Use whatever your beam is on, or whatever your hand is touching |
+| Trigger | Use whatever your beam is on, or whatever your hand is touching — otherwise fire the weapon in that hand |
+| Swing a hand | Attack with a melee weapon. No button: the blade cuts when you move it |
 | Grip | Use whatever your hand is on (near-grab only) |
 | `A` | Jump (smooth mode only) |
 
@@ -170,7 +175,38 @@ Enter VR and confirm, in order:
     **Walk speed**; a stepper at the end of its range greys out rather than doing nothing.
     **Render scale** says on the board that it applies on the next VR entry — check that it
     does. **Restore defaults** puts everything back. Reload; your choices are still there.
-13. **The dungeon** — open the door and keep walking down the passage. It should lead into a
+13. **Main hand** — the same board has a **Main hand** row. Set it to whichever controller you
+    actually want your main weapon in, and check the weapon moves to that hand. Everything
+    below assumes you have.
+14. **The weapons** — there are three training dummies down the left-hand side of the foyer.
+    - **The Emberwand** should be in your main hand, a short rod with a lit tip. Point it at
+      the plain dummy and **hold** the trigger: bolts should leave from the tip, along the
+      same line the pointer beam takes, and arc very slightly on the way. Damage numbers come
+      off the dummy where they land. This is the one thing that cannot be checked at a desk —
+      **does the wand point where you think it points?** If bolts leave at an angle to your
+      hand, say so.
+    - The blue bar on the wand is mana. Hold the trigger until it empties: the wand should
+      stop firing and give a small tick of haptic rather than going silently dead, and the
+      bar should refill on its own after about a second of not firing.
+    - The tip dims while the wand is cooling between shots and brightens when it is ready.
+      Check that it reads at a glance rather than looking like a fault.
+    - **The Frostbrand** — buy it and put it in your off hand. It should stick out of your
+      fist *along the controller*, like holding a real sword, with the blade pointing away
+      from you. **If it points backwards, into your own arm, report that** — it is the one
+      piece of geometry here that no desktop test can check.
+    - Swing it at a dummy. A committed swing should connect and leave the dummy glowing
+      faintly blue; the number should be larger for a harder swing. Then try the two things
+      that must *not* work: **waggling** your wrist at it as fast as you can (you should get
+      no more hits than swinging properly, and weaker ones), and **walking into** the dummy
+      with the blade held still, which should do nothing at all. Same for turning on the spot
+      with the stick while holding the blade out.
+    - Hit the **Soaked** dummy with the wand and the plain one with the same number of shots.
+      The soaked one should visibly lose less health. Hit the **Brittle** one with the sword:
+      it should lose more.
+    - Kill a dummy. It should topple, and stand back up whole a few seconds later.
+    - Finally, point at the **shop board** with a wand in that hand and pull the trigger. It
+      must press the button and **not** fire a bolt into the shop.
+15. **The dungeon** — open the door and keep walking down the passage. It should lead into a
     generated level rather than a dead end: rooms and corridors, lit by torches with real
     darkness between them. Every torch is a visible sconce on the wall — a flame and a
     bracket, not a glow coming from nowhere. Check you can walk a long way in and back out
@@ -183,7 +219,7 @@ Enter VR and confirm, in order:
     should fade the same way in reverse; it should never fade partway and then cut out. If
     either still looks wrong, report it — ideally which part (the onset, the overall speed, or
     a sudden cutoff) and roughly how far you were from the torch.
-14. **Starting over** — turn around. The "new game" plaque is on the back wall behind the
+16. **Starting over** — turn around. The "new game" plaque is on the back wall behind the
     spawn. One press arms it and it says so; a second wipes gold, weapons and upgrades back
     to a first launch. Leave it armed and walk away — it must stand down by itself. Then
     check the settings board: your comfort options must *not* have been wiped with it.

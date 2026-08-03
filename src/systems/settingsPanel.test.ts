@@ -5,6 +5,7 @@ import {
   sanitiseSettings,
   type Settings,
 } from './settings'
+import { SURFACE_TOUCH_MARGIN } from './interaction'
 import {
   SETTINGS_PANEL_HEIGHT,
   SETTINGS_PANEL_WIDTH,
@@ -85,6 +86,38 @@ describe('settingsButtons', () => {
         expect(apart, `${first.id} overlaps ${second.id}`).toBe(true)
       }
     }
+  })
+
+  it('leaves more room between two rows than the near-grab tolerance', () => {
+    // Sprint 2.2 tightened the row pitch to fit the main-hand row on the same board. If two
+    // rows end up closer together than twice `SURFACE_TOUCH_MARGIN`, their touch tolerances
+    // overlap and a hand on one button can pick the one below — which is precisely the
+    // defect that made the shop unusable on its first headset pass.
+    const buttons = settingsButtons(make())
+    for (const first of buttons) {
+      for (const second of buttons) {
+        if (first === second) continue
+        const gapY = Math.abs(first.rect.cy - second.rect.cy) - (first.rect.h + second.rect.h) / 2
+        // Only rows above one another; side-by-side buttons are separated horizontally.
+        if (gapY < 0) continue
+        expect(gapY, `${first.id} and ${second.id} are too close`).toBeGreaterThan(
+          SURFACE_TOUCH_MARGIN * 2,
+        )
+      }
+    }
+  })
+
+  it('offers the main hand as a choice', () => {
+    // Without it, `main` in the save can only mean "right", and a left-handed player buys a
+    // sword that appears in their weak hand.
+    const buttons = settingsButtons(make({ mainHand: 'right' }))
+    expect(buttons.find((b) => b.id === 'set-mainHand-right')?.state).toBe('done')
+    expect(buttons.find((b) => b.id === 'set-mainHand-left')?.state).toBe('available')
+  })
+
+  it('has a row label for every option row', () => {
+    const rows = settingsRows(make())
+    expect(rows.map((row) => row.label)).toContain('Main hand')
   })
 })
 

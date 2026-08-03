@@ -54,7 +54,20 @@ export interface Settings {
    * other than their own legs. 0 disables it.
    */
   comfortVignette: number
+  /**
+   * Which physical controller is the player's **main** hand.
+   *
+   * The save equips weapons to `main` and `off`, never to left and right, so that a
+   * left-handed player is not made to hold the sword in their weak hand because a data table
+   * said "right". This is the one place that abstraction meets a real controller, and it has
+   * to be a setting rather than a guess: the headset does not know which hand somebody
+   * writes with, and getting it wrong means every weapon they buy appears in the wrong hand.
+   */
+  mainHand: MainHand
 }
+
+/** Which physical controller the player's dominant hand is on. */
+export type MainHand = 'left' | 'right'
 
 export const DEFAULT_SETTINGS: Settings = {
   framebufferScale: 1.0,
@@ -78,6 +91,9 @@ export const DEFAULT_SETTINGS: Settings = {
   // A brisk walk. Faster reads as skating and makes vection much worse.
   moveSpeed: 3,
   comfortVignette: 0.7,
+  // Right, because most people are right-handed, and stated as a default rather than as an
+  // assumption baked into the weapon rigs.
+  mainHand: 'right',
 }
 
 /**
@@ -99,6 +115,7 @@ export const SETTING_LIMITS = {
 export const SETTING_OPTIONS = {
   locomotion: ['smooth', 'teleport'],
   turn: ['snap', 'smooth'],
+  mainHand: ['left', 'right'],
 } as const satisfies Record<string, readonly string[]>
 
 interface SettingsStore extends Settings {
@@ -113,8 +130,9 @@ const STORAGE_KEY = 'dcvr.settings'
  * reach players who never touched the setting.**
  *
  * v1 — the two XR render knobs. v2 — movement and comfort. v3 — smooth turning by default.
+ * v4 — which controller is the main hand, for the weapon rigs in Sprint 2.2.
  */
-export const SETTINGS_VERSION = 3
+export const SETTINGS_VERSION = 4
 
 /**
  * Settings whose stored value is discarded when migrating from before `[version]`, because
@@ -197,7 +215,25 @@ export function sanitiseSettings(input: unknown): Settings {
     smoothTurnSpeed: clampSetting('smoothTurnSpeed', raw.smoothTurnSpeed),
     moveSpeed: clampSetting('moveSpeed', raw.moveSpeed),
     comfortVignette: clampSetting('comfortVignette', raw.comfortVignette),
+    mainHand: pickOption('mainHand', raw.mainHand),
   }
+}
+
+/**
+ * Turn a loadout slot into a physical controller, and back.
+ *
+ * One function each way, in the module that owns the setting, so that "main means right
+ * unless the player said otherwise" is stated once. Every other file asks.
+ */
+export function handednessOf(slot: 'main' | 'off', mainHand: MainHand): MainHand {
+  if (slot === 'main') return mainHand
+  return mainHand === 'right' ? 'left' : 'right'
+}
+
+export function slotOf(handedness: string, mainHand: MainHand): 'main' | 'off' | null {
+  if (handedness === mainHand) return 'main'
+  if (handedness === 'left' || handedness === 'right') return 'off'
+  return null
 }
 
 type NumericSetting = keyof typeof SETTING_LIMITS

@@ -8,7 +8,12 @@ sprint, before committing. The roadmap itself lives in [PLAN.md](PLAN.md).
 ## Current position
 
 > **Epics 0 and 1 are signed off on the Quest 3, and so is Sprint 2.1. Sprint 2.2 — the
-> weapon & attack framework — is next.**
+> weapon & attack framework — is built and awaiting its headset pass.**
+>
+> There are weapons in your hands now, and three training dummies in the foyer to try them
+> on. The Emberwand throws arcing fire bolts that cost mana and set things burning; the
+> Frostbrand cuts when you actually swing it and chills what it hits. Damage numbers come off
+> everything you land.
 >
 > Opening the foyer door leads down the passage into a generated dungeon: rooms and
 > corridors, torch-lit, dark between the torches, different every wave and identical for the
@@ -34,7 +39,7 @@ sprint, before committing. The roadmap itself lives in [PLAN.md](PLAN.md).
 | | 1.3 Shop & weapon dialog | ✅ Verified on Quest 3 |
 | | 1.4 In-world options & new game | ✅ Verified on Quest 3 |
 | **2 — Wave Combat Core** | 2.1 Procedural dungeon generation | ✅ Verified on Quest 3 |
-| | 2.2 Weapon & attack framework | 🟦 In progress |
+| | 2.2 Weapon & attack framework | 🟨 Built — awaiting headset pass |
 | | 2.3 Enemies, AI & wave loop | ⬜ |
 | | 2.4 Hit feedback & VFX | ⬜ |
 | **3 — Fear & Atmosphere** | 3.1 Darkness & lighting | ⬜ |
@@ -685,6 +690,111 @@ Known scaffolding, and the one deliberate gap:
   floor, shadow strategy and the real light budget manager.
 - The wave still clears by walking back into the foyer. **Sprint 2.3**'s Wave Director takes
   that over, along with the spawn points and the nav grid this sprint bakes for it.
+
+### 🟨 Sprint 2.2 — Weapon & attack framework
+
+**Verified on desktop:** typecheck clean · 474/474 unit tests · production build succeeds ·
+smoke test walks up to a training dummy, holds the trigger, and checks that health came off,
+that mana was spent and came back, that the wand fired at its rate rather than every step —
+then walks to a fire-resistant dummy and checks the same volley costs it visibly less, and
+finally swings the blade and checks the target ends up **chilled**, which only the Frostbrand
+can do.
+
+Delivered — the rules, all pure and unit-tested, none of them importing three.js:
+
+- `src/systems/combat/damage.ts` — the one path from "something hit something" to "the target
+  lost health": crit, element, resistance, and the statuses an element leaves behind. 26 tests.
+- `src/systems/combat/resources.ts` — mana, and cooldowns derived from the weapon table's
+  `rate`. One pool for the whole player. 19 tests.
+- `src/systems/combat/melee.ts` — swing speed, the damage curve it drives, and the conversion
+  into the player's own frame that keeps walking from counting as swinging. 20 tests.
+- `src/systems/combat/projectiles.ts` — the pool, flight, expiry, and the swept-segment
+  contract with the world. 15 tests.
+- `src/systems/combat/targets.ts` — the damageable registry, segment/sphere sweeps, the single
+  `applyDamage`, and the ring buffer the damage numbers read. 23 tests.
+- `src/systems/combat/weapon.ts` — one hand holding one weapon, and the four reasons it may
+  refuse to attack. 20 tests.
+
+And the wiring:
+
+- `src/systems/CombatDriver.tsx` — the ordering, at `SystemOrder.Combat`: mana, then each
+  hand, then flight, then impacts, then the status tick.
+- `src/entities/WeaponRig.tsx` — the weapon in a hand, in both modes, and the anchor every
+  other system measures from.
+- `src/entities/Projectiles.tsx` — the whole pool as one instanced draw.
+- `src/entities/TrainingDummy.tsx` — three dummies in the foyer, with different resistances.
+- `src/ui/DamageNumbers.tsx` — billboarded, pooled, with the digits cached by text.
+- `src/systems/settings.ts` — a **main hand** setting, and the board row for it.
+
+Decisions made during the sprint:
+
+- **Every attack goes through one `resolveDamage` and one `applyDamage`.** Crit, element,
+  resistance and status are four rules that each want to apply "just this once, for my case",
+  and the moment two of them exist in two places the game has a weapon that cannot crit and
+  an enemy immune to nothing. A burning status ticking damage goes through the same path, so
+  a target that burns to death dies properly rather than quietly losing health.
+- **Damage is rounded to a whole number when it is resolved, not when it is drawn.** The
+  player is shown the figure and the target loses exactly it. A number that says 14 while
+  13.6 came off is a health bar that never quite adds up and a bug nobody can reproduce.
+- **A wand is pointed; a blade is an extension of the fist.** So the wand's rig hangs in the
+  controller's target-ray space, on the same line as the pointer beam, and the sword's hangs
+  off the grip. Aiming a wand down the grip is the Sprint 1.3 defect that pointed at the
+  floor. *(The direction the blade sticks out of the grip is the one thing here that cannot be
+  checked without a headset — see the checklist.)*
+- **Melee speed is measured in the player's own frame.** Carrying a blade at a 3 m/s walk is
+  faster than the speed floor, so a world-space measurement makes *walking into things* an
+  attack, and stick-turning on the spot sweeps the blade through several metres a second
+  without the player moving their arm. Found by the smoke test, which reported the sword
+  swinging while the player was walking to it.
+- **The swing's cooldown starts when it *hits*, not when it gets fast.** The first version
+  spent the swing on the single fixed step where the speed crossed the floor — nine
+  centimetres of arc, at the start of the movement, which is where the blade is furthest from
+  what it is aimed at. Every number looked right and the sword hit nothing. With the cooldown
+  on the hit, the window stays open across the arc: swinging at air is free, connecting costs
+  a full swing, and waggling is still worthless because each *hit* spends one.
+- **Nothing is ever tested as a point.** A bolt at 18m/s covers 30cm in a fixed step and a
+  sword tip covers 10cm — both wider than most of what they are aimed at, and than every wall.
+  Projectiles and swings both sweep the segment from where they were to where they now are.
+- **The weapon is the HUD.** A wand's tip dims while it is cooling and brightens when it is
+  ready; the mana bar is drawn on the weapon that spends it, and only on weapons that spend
+  it. A floating cooldown wheel is a tax on every second of a horror game, and this readout is
+  already where the player is looking.
+- **Three dummies, not one.** One proves a bolt can land. Three with different resistances
+  prove the *pipeline* — that the element a weapon deals survives the trip to the target,
+  which is the part that can be silently wrong while everything still looks like it works.
+- **A main-hand setting, because `main` and `off` had to mean something.** The save has
+  equipped weapons to `main`/`off` since 1.2 specifically so a left-handed player is not made
+  to hold the sword in their weak hand; this sprint is where that meets a real controller, and
+  the headset cannot guess. Settings version bumped to 4, and the board's rows were tightened
+  to fit a ninth — with a test that two rows never come closer than twice the near-grab
+  tolerance, which is what made the shop unusable on its first headset pass.
+- **The desktop viewmodel is drawn at half scale.** At full size a real 30cm wand held 55cm
+  from a 70° camera filled a quarter of the screen. In a headset that is correct and
+  unremarkable, because your eyes and your arm agree how far away it is; on a monitor there is
+  no such agreement and it reads as a comedy prop. Only the drawing is scaled — the anchor,
+  which is where bolts leave from, is not.
+- **R3F's default camera is not in the scene graph.** A viewmodel portalled into it had its
+  world matrix computed correctly — the driver fired from exactly the right place — and was
+  never drawn. A weapon that works and is invisible is the most confusing possible pair of
+  symptoms; `scene.add(camera)` costs nothing, since a camera draws nothing itself.
+- **Desktop melee is one animation, not a second damage path.** The viewmodel's arc moves the
+  same anchor a real arm moves, and the same speed rule measures it. The "active hitbox
+  window" the plan asks for is not a flag: it is the blade actually moving fast enough.
+
+Known scaffolding, and the gaps:
+
+- **`three-mesh-bvh` is still unused.** The plan had hitscan raycasts going through it; every
+  attack in this sprint is a swept segment against a small registry of spheres plus one Rapier
+  ray, which is both cheaper and simpler at this scale. The case for a BVH arrives with real
+  enemy meshes in 2.3, and PLAN.md now says so rather than leaving a promise nobody kept.
+- **The Boneshard Staff does not charge.** It fires as an expensive slow wand. Hold-to-charge
+  is its whole identity and it belongs with the rest of the roster work in 4.1; the two weapons
+  this sprint owes end-to-end are the Emberwand and the Frostbrand, and both are.
+- Impact VFX, hitstop and the dissolve are **Sprint 2.4**. The damage numbers landed early
+  because this sprint's acceptance test names them; everything around them is still a haptic
+  pulse and a hit flash.
+- Purchase and combat **audio is Sprint 3.2**, as it has been since 1.3.
+- The dummies are primitives, like everything else. Still no CC0 art kit.
 
 ---
 
