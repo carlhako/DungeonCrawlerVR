@@ -12,7 +12,9 @@ import { sanitiseSettings, useSettings, type Settings } from '@/systems/settings
 import type { SaveData } from '@/systems/save'
 import type { WeaponId } from '@/data/weapons'
 import { combatSnapshot } from '@/systems/combat/state'
-import { damageables } from '@/systems/combat/targets'
+import { applyDamage, damageables, publishDamage } from '@/systems/combat/targets'
+import { enemyPool, enemySnapshot } from '@/systems/enemies/state'
+import { playerVitals } from '@/systems/vitals'
 
 /**
  * Dev-only handle onto the running game, hung off `window.__DCVR__`.
@@ -145,6 +147,35 @@ export interface DebugHandle {
     y: number
     z: number
   }>
+  /**
+   * The wave and everything in it: what the Wave Director is doing, the player's health, and
+   * every live enemy with its phase and position.
+   *
+   * Sprint 2.3's acceptance test is the whole loop, and almost none of it is visible in a
+   * screenshot: a wave that has stopped spawning, an enemy stuck against a wall, a telegraph
+   * that never resolves and a player quietly on 3 health all render perfectly well. `phase`
+   * is the one that earns its keep — it is the AI's own account of itself, and the difference
+   * between "it is walking at me" and "it has decided I am unreachable".
+   */
+  readonly enemies: ReturnType<typeof enemySnapshot>
+  /**
+   * Kill everything currently standing, through the real damage path.
+   *
+   * Scaffolding for the smoke test, and narrowly scoped on purpose: it does not clear the
+   * wave, count a kill or pay anything out. It deals lethal damage through `applyDamage` and
+   * leaves the driver to notice, so what the test then asserts — the kill count, the gold, the
+   * clear, the return to the foyer — is the same code path a wand firing at a goblin takes.
+   * Killing a wave of skeletons twelve damage at a time under SwiftShader takes minutes.
+   */
+  slay(): number
+  /**
+   * Set the player's health directly.
+   *
+   * Also for the smoke test, and for the same reason: the death path has to be exercised by a
+   * real enemy landing a real blow, and getting there honestly from 100 health is several
+   * minutes of headless frames. This sets up the last hit; the last hit itself is real.
+   */
+  setHealth(hp: number): void
 }
 
 /**
@@ -258,6 +289,33 @@ export function installDebugHandle(): void {
     },
     get combat() {
       return combatSnapshot()
+    },
+    get enemies() {
+      return enemySnapshot()
+    },
+    slay: () => {
+      let killed = 0
+      for (const enemy of enemyPool.items) {
+        if (!enemy.active || !enemy.target.enabled || enemy.target.hp <= 0) continue
+        const event = applyDamage(
+          enemy.target,
+          {
+            amount: enemy.target.hp,
+            element: 'physical',
+            crit: false,
+            status: null,
+            source: { kind: 'melee', weaponId: null, hand: null },
+          },
+          enemy.position,
+        )
+        publishDamage(event)
+        killed += 1
+      }
+      return killed
+    },
+    setHealth: (hp) => {
+      playerVitals.hp = Math.max(0, Math.min(playerVitals.max, hp))
+      playerVitals.invulnerable = 0
     },
     get damageables() {
       return damageables().map((target) => ({

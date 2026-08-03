@@ -58,6 +58,32 @@ export const playerState: PlayerState = {
 export const playerCollider: { current: Collider | null } = { current: null }
 
 /**
+ * A position the player is to be moved to, applied by `PlayerRig` on its next step.
+ *
+ * There is exactly one thing in this game allowed to use it: **death**. Everything else the
+ * player does, they walk — they walk into the dungeon rather than being dropped into it, and
+ * they walk home after clearing a wave, because a cut in VR is a cut to somebody wondering
+ * where they went. Dying is the one case with no walk available, and leaving a corpse standing
+ * in a corridor waiting to be escorted back would be worse.
+ *
+ * A pending value rather than a direct write, for the same reason the teleport arc is: the
+ * character controller owns the capsule, and something else writing its translation halfway
+ * through a step leaves physics and the rig disagreeing about where the player is.
+ */
+const recall: { pending: { x: number; y: number; z: number } | null } = { pending: null }
+
+export function recallPlayer(to: { x: number; y: number; z: number }): void {
+  recall.pending = { ...to }
+}
+
+/** Take the pending recall, if any. Clears it, so one death moves the player once. */
+export function consumeRecall(): { x: number; y: number; z: number } | null {
+  const pending = recall.pending
+  recall.pending = null
+  return pending
+}
+
+/**
  * Where the player starts, in both rooms.
  *
  * Shared deliberately: the foyer is laid out around this point (facing the door, with the

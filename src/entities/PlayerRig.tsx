@@ -26,6 +26,7 @@ import {
 } from '@/systems/locomotion'
 import { interactionState } from '@/systems/interaction'
 import {
+  consumeRecall,
   DESKTOP_EYE_HEIGHT,
   PLAYER_CENTRE_OFFSET,
   PLAYER_HALF_HEIGHT,
@@ -311,7 +312,8 @@ function CharacterController({ body, collider, yawGroup, originGroup }: Controll
         playerState.headBlocked = 0
       }
 
-      const landing = teleporting ? consumeTeleport() : null
+      // A recall beats a teleport: it is only ever death, and death is not negotiable.
+      const landing = consumeRecall() ?? (teleporting ? consumeTeleport() : null)
       if (landing) {
         nextX = landing.x
         nextY = landing.y + PLAYER_CENTRE_OFFSET

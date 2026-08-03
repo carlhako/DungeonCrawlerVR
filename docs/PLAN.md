@@ -179,7 +179,7 @@ Every sprint ends with a **testable build**. Sprints from 0.2 onward are verifie
 - ✅ **Test:** shoot and swing at training dummies in the foyer; damage numbers, mana drain, and cooldowns behave in both modes.
 
 **Sprint 2.3 — Enemies, AI & the wave loop**
-- `Enemy` base: HP, stagger, hit reactions, death, loot drop; GLTF models with Mixamo idle/walk/attack/death clips and blended transitions.
+- `Enemy` base: HP, stagger, hit reactions, death, loot drop. GLTF models with Mixamo clips were the plan and did not land — the CC0 art gap this project has carried since 1.1 is still open, so enemies are primitives whose *states* are readable (lean, bob, eye flare) rather than animated. `three-mesh-bvh` stays unused for the same reason: there are no enemy meshes to build one over yet.
 - AI: proximity aggro, nav-grid pathfinding, steering/separation, attack telegraph → strike → recover.
 - **Wave Director**: budget-based composition table, staggered spawning, wave-clear detection, gold payout.
 - Implement **Goblin Skulker**, **Skeleton Warrior**, **Wraith**.

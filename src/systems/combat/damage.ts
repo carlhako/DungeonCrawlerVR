@@ -32,9 +32,16 @@ export const MAX_VULNERABILITY = -1
 /** Fraction of incoming damage removed, by element. Negative means it hurts more. */
 export type Resistances = Partial<Record<Element, number>>
 
-/** Who or what threw the punch. Carried through so Sprint 2.4 can key VFX off it. */
+/**
+ * Who or what threw the punch. Carried through so Sprint 2.4 can key VFX off it.
+ *
+ * `enemy` is the one that goes the other way — a claw landing on the player rather than a
+ * weapon landing on a target. It resolves through the same `resolveDamage` for the same
+ * reason everything else does; where it *lands* is `vitals.ts`, because the player is
+ * deliberately not in the damageable registry.
+ */
 export interface DamageSource {
-  kind: 'projectile' | 'melee' | 'status'
+  kind: 'projectile' | 'melee' | 'status' | 'enemy'
   weaponId: WeaponId | null
   hand: Hand | null
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { generate, isWalkable, type Cell, type DungeonMap } from './generate'
-import { bakeNav, findPath, isOpen, nearestOpen, type NavGrid } from './nav'
+import { bakeNav, findPath, hasLineOfSight, isOpen, nearestOpen, type NavGrid } from './nav'
 
 /**
  * Pathfinding, tested against real generated dungeons rather than hand-drawn grids — the
@@ -176,5 +176,88 @@ describe('nearestOpen', () => {
       '#####',
     ])
     expect(nearestOpen(nav, { x: 0, y: 0 }, 1)).toBeNull()
+  })
+})
+
+describe('hasLineOfSight', () => {
+  it('sees straight down an open corridor', () => {
+    const nav = grid([
+      '#######',
+      '#.....#',
+      '#######',
+    ])
+    expect(hasLineOfSight(nav, { x: 1, y: 1 }, { x: 5, y: 1 })).toBe(true)
+  })
+
+  it('does not see through a wall', () => {
+    const nav = grid([
+      '#######',
+      '#..#..#',
+      '#######',
+    ])
+    expect(hasLineOfSight(nav, { x: 1, y: 1 }, { x: 5, y: 1 })).toBe(false)
+  })
+
+  it('is symmetric — if it can see you, you can see it', () => {
+    const nav = grid([
+      '######',
+      '#..#.#',
+      '#....#',
+      '######',
+    ])
+    for (let ax = 1; ax <= 4; ax++) {
+      for (let az = 1; az <= 2; az++) {
+        for (let bx = 1; bx <= 4; bx++) {
+          for (let bz = 1; bz <= 2; bz++) {
+            const from = { x: ax, y: az }
+            const to = { x: bx, y: bz }
+            if (!isOpen(nav, ax, az) || !isOpen(nav, bx, bz)) continue
+            expect(hasLineOfSight(nav, from, to)).toBe(hasLineOfSight(nav, to, from))
+          }
+        }
+      }
+    }
+  })
+
+  it('refuses to squeeze through the corner where two walls meet', () => {
+    // The same rule findPath enforces. A sightline threading a diagonal gap is a sightline
+    // through solid rock, and something that aggros down it has walked through a wall to
+    // reach you.
+    const nav = grid([
+      '###',
+      '#.#',
+      '##.',
+    ])
+    expect(hasLineOfSight(nav, { x: 1, y: 1 }, { x: 2, y: 2 })).toBe(false)
+  })
+
+  it('sees along a clear diagonal', () => {
+    const nav = grid([
+      '####',
+      '#..#',
+      '#..#',
+      '####',
+    ])
+    expect(hasLineOfSight(nav, { x: 1, y: 1 }, { x: 2, y: 2 })).toBe(true)
+  })
+
+  it('sees itself, and never sees out of solid rock', () => {
+    const nav = grid(['###', '#.#', '###'])
+    expect(hasLineOfSight(nav, { x: 1, y: 1 }, { x: 1, y: 1 })).toBe(true)
+    expect(hasLineOfSight(nav, { x: 0, y: 0 }, { x: 1, y: 1 })).toBe(false)
+  })
+
+  it('agrees with the generator on real levels: anything visible is reachable', () => {
+    for (const seed of SEEDS) {
+      const map = generate(seed)
+      const nav = bakeNav(map)
+      const from = map.entry
+      for (const spawn of map.spawns.slice(0, 12)) {
+        if (!hasLineOfSight(nav, from, spawn)) continue
+        // A clear sightline across open floor implies a route, always. If this ever fails,
+        // one of the two is wrong about what a wall is.
+        expect(findPath(nav, from, spawn).length).toBeGreaterThan(0)
+      }
+    }
   })
 })

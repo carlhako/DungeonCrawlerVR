@@ -1,21 +1,24 @@
 import { useRef } from 'react'
 import { SystemOrder } from '@/core/loop'
 import { useFixedUpdate } from '@/core/simulation'
-import { playerState } from '@/systems/player'
+import { playerState, recallPlayer, PLAYER_SPAWN } from '@/systems/player'
 import { useRun, type RunPhase } from '@/systems/run'
 import { useDungeon } from '@/systems/dungeon/store'
 import { DUNGEON_MOUTH, FOYER_BOUNDS } from '@/scenes/Foyer'
 
 /**
- * Drives the run machine's timed and positional transitions.
+ * Drives the run machine's timed transitions.
  *
- * As of Sprint 2.1 "loading" actually builds something: the dungeon for this wave is
- * generated from a seed derived from the wave number, and anchored so that it meets the far
- * end of the foyer's passage. Nothing to kill until 2.3, so "the wave is cleared" is still
- * the player walking back into the foyer.
+ * "Loading" builds the dungeon for this wave — generated from a seed derived from the wave
+ * number, anchored so that it meets the far end of the foyer's passage — and the end-of-wave
+ * states hold for a beat before handing the player back to the shop.
  *
- * The Wave Director in 2.3 takes over `cleared`, and this file loses everything except the
- * loading beat and the end-of-wave pause.
+ * That is now all it does. Sprint 2.3's Wave Director took over `cleared`, which used to be
+ * "walk out of the foyer and back in" and is now "everything that arrived is dead", and
+ * `EnemyDriver` owns `died`. What is left here is the two beats that exist for the player
+ * rather than for the game: a door that opens onto a level which appeared between two frames
+ * reads as a glitch, and a wave that ends by yanking you back to the shop mid-swing reads as
+ * a bug.
  */
 
 /**
@@ -27,20 +30,25 @@ import { DUNGEON_MOUTH, FOYER_BOUNDS } from '@/scenes/Foyer'
  */
 const LOADING_SECONDS = 0.9
 
-/** How long the end-of-wave state holds before handing the player back to the shop. */
+/** How long the end-of-wave state holds before the player is handed back to the shop. */
 const COMPLETE_SECONDS = 2.5
 
-const DOORWAY_Z = -FOYER_BOUNDS.depth / 2
-/** Past the doorway and into the passage: the player has committed to the wave. */
-const OUTSIDE_Z = DOORWAY_Z - 0.6
-/** Back inside the room proper. Hysteresis, so standing in the doorway doesn't flicker. */
-const INSIDE_Z = DOORWAY_Z + 0.4
+/**
+ * Far enough into the foyer to count as home.
+ *
+ * A cleared wave does not end where the last enemy died — the player **walks back**, the same
+ * way they walked in. That is not ceremony: the level is continuous with the foyer on purpose,
+ * and yanking somebody out of it the instant the fight ends is the cut to black that Sprint
+ * 2.1 built the whole passage to avoid. The walk home through a level you have just emptied is
+ * also the only quiet minute in a wave.
+ *
+ * Death is the exception, below, and the only one.
+ */
+const HOME_Z = -FOYER_BOUNDS.depth / 2 + 0.4
 
 export function RunDriver() {
   const elapsed = useRef(0)
   const phase = useRef<RunPhase>('foyer')
-  /** Whether the player has actually left the foyer this wave. */
-  const left = useRef(false)
 
   useFixedUpdate((dt) => {
     const run = useRun.getState()
@@ -48,7 +56,6 @@ export function RunDriver() {
     if (run.phase !== phase.current) {
       phase.current = run.phase
       elapsed.current = 0
-      left.current = false
     }
     elapsed.current += dt
 
@@ -62,19 +69,29 @@ export function RunDriver() {
         if (elapsed.current >= LOADING_SECONDS) run.send('loaded')
         break
 
-      case 'wave': {
-        // Placeholder clear condition: go out, come back. The `left` latch matters — the
-        // player is standing inside the foyer at the moment the wave starts, so without it
-        // every wave would clear itself on the step it began.
-        const z = playerState.position.z
-        if (z < OUTSIDE_Z) left.current = true
-        if (left.current && z > INSIDE_Z) run.send('cleared')
+      case 'wave':
+        // Nothing. `EnemyDriver` decides when a wave is over, and it is over when every enemy
+        // in it is dead — not when the player walks back through the door. Retreating to the
+        // foyer is allowed and always was; it is the safe room. It just does not finish
+        // anything any more, so eventually you have to come back out.
         break
-      }
 
       case 'waveComplete':
+        // Held until the player is actually back in the foyer. The dungeon stays standing
+        // and empty until then; `foyer` below is what puts it away.
+        if (elapsed.current >= COMPLETE_SECONDS && playerState.position.z > HOME_Z) {
+          run.send('return')
+        }
+        break
+
       case 'death':
-        if (elapsed.current >= COMPLETE_SECONDS) run.send('return')
+        // The one forced move in the game. There is no walk home available from dead, and
+        // leaving a corpse standing in a corridor waiting to be escorted back is worse than
+        // the cut. See `recallPlayer`.
+        if (elapsed.current >= COMPLETE_SECONDS) {
+          recallPlayer({ x: PLAYER_SPAWN[0], y: PLAYER_SPAWN[1], z: PLAYER_SPAWN[2] })
+          run.send('return')
+        }
         break
 
       case 'foyer':

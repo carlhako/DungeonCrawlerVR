@@ -6,6 +6,7 @@ import { ELEMENT_COLOUR } from '@/data/elements'
 import { WEAPONS, weaponStats, type Hand, type WeaponId } from '@/data/weapons'
 import { cooldownProgress } from '@/systems/combat/resources'
 import { handWeapons, manaPool } from '@/systems/combat/state'
+import { healthFraction, playerVitals } from '@/systems/vitals'
 import { setWeaponRig } from '@/systems/combat/rigs'
 import { useGame } from '@/systems/game'
 import { slotOf, useSettings } from '@/systems/settings'
@@ -187,6 +188,7 @@ function WeaponRigBody({
   const anchor = useRef<Group>(null)
   const glow = useRef<MeshStandardMaterial>(null)
   const manaFill = useRef<Mesh>(null)
+  const healthFill = useRef<Mesh>(null)
   const definition = WEAPONS[weaponId]
   const melee = definition.archetype === 'melee'
   const reach = definition.reach ?? 0.6
@@ -241,6 +243,14 @@ function WeaponRigBody({
       manaFill.current.position.x = -(1 - fraction) * MANA_BAR_WIDTH * 0.5
     }
 
+    // Health rides *every* weapon, because unlike mana it is never irrelevant. See the note
+    // on `VitalsBar` for why it is here and not on a wrist.
+    if (healthFill.current) {
+      const fraction = healthFraction(playerVitals)
+      healthFill.current.scale.x = Math.max(0.001, fraction)
+      healthFill.current.position.x = -(1 - fraction) * MANA_BAR_WIDTH * 0.5
+    }
+
     const group = anchor.current
     if (!group || !desktop) return
 
@@ -289,6 +299,7 @@ function WeaponRigBody({
     >
       <group scale={desktop ? DESKTOP_SCALE : 1}>
         <WeaponModel weaponId={weaponId} glow={glow} />
+        <VitalsBar reach={reach} melee={melee} fill={healthFill} />
         {definition.manaCost > 0 && <ManaBar reach={reach} melee={melee} fill={manaFill} />}
       </group>
     </group>
@@ -297,6 +308,45 @@ function WeaponRigBody({
 
 /** Width of the mana bar on a weapon, in metres. Small: it is read at arm's length. */
 const MANA_BAR_WIDTH = 0.09
+
+/**
+ * Health, drawn on whatever the player is holding.
+ *
+ * On the weapon rather than on a wrist, and on **both** weapons rather than one. PLAN.md puts
+ * health on the left wrist in Sprint 4.4's diegetic HUD, and that is still where it belongs —
+ * but a wrist readout needs a wrist mount that only exists in VR, and Sprint 2.3 is the sprint
+ * where something can kill you. A number the player cannot see while it is going down is not a
+ * number they can play around. This is the readout that already works in both modes, sits
+ * where the player is already looking, and costs two more quads.
+ *
+ * Unlike mana it is drawn on every weapon, because unlike mana it is never irrelevant: a bar
+ * that is missing from the sword is a bar the player has to swap hands to read while something
+ * is hitting them.
+ */
+function VitalsBar({
+  reach,
+  melee,
+  fill,
+}: {
+  reach: number
+  melee: boolean
+  fill: React.RefObject<Mesh | null>
+}) {
+  const z = melee ? reach - 0.05 : 0.26
+
+  return (
+    <group position={[0, 0.055, z]} rotation={[-Math.PI / 2.6, 0, 0]}>
+      <mesh>
+        <planeGeometry args={[MANA_BAR_WIDTH, 0.012]} />
+        <meshBasicMaterial color="#241414" toneMapped={false} />
+      </mesh>
+      <mesh ref={fill} position={[0, 0, 0.001]}>
+        <planeGeometry args={[MANA_BAR_WIDTH, 0.012]} />
+        <meshBasicMaterial color="#e0523a" toneMapped={false} />
+      </mesh>
+    </group>
+  )
+}
 
 /**
  * Mana, drawn on the weapon that spends it.

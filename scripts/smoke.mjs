@@ -290,19 +290,144 @@ dungeon.inside = await walkUntil(['KeyW'], (p) => p.z < -16, 20)
 dungeon.render = await page.evaluate(() => window.__DCVR__.render)
 dungeon.cell = await page.evaluate(() => window.__DCVR__.dungeon?.playerCell ?? null)
 
-// Back the way we came. Reaching the foyer clears the wave, and the level is put away.
-foyer.backInside = await walkUntil(
-  ['KeyS'],
-  async () => (await readRun())?.phase !== 'wave',
-  25,
-)
+/**
+ * Open the door and get a wave under way.
+ *
+ * `Space` on the door is a *toggle*, and after walking home through it the door is still
+ * standing open — so a single press closes it again and starts nothing. Pressing until the
+ * run machine actually moves is what a player does without thinking about it.
+ */
+async function openDoorAndStart(maxPresses = 4) {
+  for (let i = 0; i < maxPresses; i++) {
+    if ((await readRun())?.phase !== 'foyer') return true
+    await page.keyboard.press('Space')
+    await page.waitForTimeout(600)
+  }
+  return (await readRun())?.phase !== 'foyer'
+}
+
+/**
+ * Walk back to the foyer, re-aiming as we go.
+ *
+ * Not `walkUntil(['KeyS'])`. Aiming at an enemy leaves the player facing wherever that enemy
+ * was, so "backwards" is no longer "back up the corridor" — which is how this first failed,
+ * with the player reversing confidently into a wall for a minute and a half. Facing the foyer
+ * and walking forwards is what a player does, and re-aiming as the position changes is the
+ * headless stand-in for looking where you are going.
+ */
+async function walkHome(maxSeconds) {
+  const deadline = Date.now() + maxSeconds * 1000
+  await page.keyboard.down('KeyW')
+  while (Date.now() < deadline) {
+    if ((await readRun())?.phase === 'foyer') break
+    // The foyer's spawn point, which is well inside the room.
+    await page.evaluate(() => window.__DCVR__.lookAt(0, 1.6, 4))
+    await page.waitForTimeout(200)
+  }
+  await page.keyboard.up('KeyW')
+  return readPlayer()
+}
+
+/**
+ * The wave itself, which is Sprint 2.3's acceptance test.
+ *
+ * None of this is visible in a screenshot. A wave that has quietly stopped spawning, an enemy
+ * wedged against a wall, a telegraph that never resolves and a player on three health all
+ * render a perfectly convincing dark corridor. So the checks are about the state: that
+ * something arrived, that it came *towards* the player rather than standing where it spawned,
+ * that a bolt from the real weapon killed one, that the wave clears only once everything is
+ * dead, and that the payout is the sum of what was killed.
+ */
+const readEnemies = () => page.evaluate(() => window.__DCVR__?.enemies ?? null)
+
+const wave = {}
+
+// The director holds the first arrival back for a few seconds, deliberately — nobody should
+// be met at the door. Then it staggers them.
+await page
+  .waitForFunction(() => (window.__DCVR__?.enemies.living ?? 0) > 0, { timeout: 30000 })
+  .catch(() => {})
+wave.firstArrival = await readEnemies()
+
+/** Distance from the player to the nearest living enemy, or null. */
+async function nearestEnemy() {
+  const [enemies, player] = await Promise.all([readEnemies(), readPlayer()])
+  if (!enemies || !player) return null
+  const living = enemies.enemies.filter((e) => e.phase !== 'dying')
+  if (living.length === 0) return null
+  let best = null
+  for (const enemy of living) {
+    const distance = Math.hypot(enemy.x - player.x, enemy.z - player.z)
+    if (!best || distance < best.distance) best = { ...enemy, distance }
+  }
+  return best
+}
+
+// It has to come to the player. An enemy that spawns and stays there is the failure mode of
+// every part of this sprint at once — aggro, line of sight, pathing or the nav bake.
+wave.approachFrom = await nearestEnemy()
+const approachDeadline = Date.now() + 45000
+let closest = wave.approachFrom
+while (Date.now() < approachDeadline) {
+  const now = await nearestEnemy()
+  if (now && (!closest || now.distance < closest.distance)) closest = now
+  if (closest && closest.distance < 4) break
+  await page.waitForTimeout(250)
+}
+wave.approachTo = closest
+wave.phasesSeen = (await readEnemies())?.enemies.map((e) => e.phase) ?? []
+
+/**
+ * Kill one with the wand.
+ *
+ * The point is not that the Emberwand does damage — Sprint 2.2's dummies proved that. It is
+ * that an *enemy* is a damageable like any other: registered once for its pool slot, hit by
+ * the same swept segment, killed through the same `applyDamage`, and then counted and paid
+ * for by the director. That chain has five links and any of them can be silently wrong.
+ */
+wave.killTarget = await nearestEnemy()
+const killDeadline = Date.now() + 60000
+while (Date.now() < killDeadline) {
+  const at = await nearestEnemy()
+  if (!at) break
+  const killed = (await readEnemies())?.killed ?? 0
+  if (killed > 0) break
+  await page.evaluate((e) => window.__DCVR__.lookAt(e.x, e.y, e.z), at)
+  await page.mouse.down({ button: 'left' })
+  await page.waitForTimeout(600)
+  await page.mouse.up({ button: 'left' })
+}
+wave.afterFirstKill = await readEnemies()
+await page.screenshot({ path: `${OUT}/smoke-wave.png` })
+
+// The rest of the wave goes through the dev handle, which deals lethal damage through the
+// real damage path and nothing else — the kill count, the gold and the clear are all still
+// the game's own. Twelve damage at a time under SwiftShader is minutes of wall clock.
+const clearDeadline = Date.now() + 120000
+while (Date.now() < clearDeadline) {
+  const run = await readRun()
+  if (run?.phase !== 'wave') break
+  await page.evaluate(() => window.__DCVR__.slay())
+  await page.waitForTimeout(500)
+}
+wave.onClear = await readEnemies()
 foyer.runOnClear = await readRun()
 
-// The end-of-wave state hands the player back to the shop on its own after a beat.
-await page.waitForFunction(() => window.__DCVR__?.run.phase === 'foyer', { timeout: 10000 })
+/**
+ * And then walk home.
+ *
+ * A cleared wave does not teleport anybody anywhere. The level is continuous with the foyer
+ * on purpose and stays standing, empty, until the player walks back through it — so this is
+ * also the check that clearing a wave did not quietly unmount the floor out from under them.
+ */
+foyer.backInside = await walkHome(90)
+foyer.runAfterWalkHome = await readRun()
 foyer.saveAfterWave = await readSave()
 // Sampled here rather than on the clear: the level is put away when the player is handed
 // back to the shop, not the moment the last enemy dies.
+await page
+  .waitForFunction(() => window.__DCVR__?.dungeon == null, { timeout: 8000 })
+  .catch(() => {})
 dungeon.cleared = await page.evaluate(() => window.__DCVR__.dungeon)
 
 /**
@@ -506,6 +631,66 @@ combat.melee = {
 await page.screenshot({ path: `${OUT}/smoke-combat.png` })
 
 /**
+ * Death, which is the other half of Sprint 2.3's acceptance test.
+ *
+ * "Death returns you to the foyer with everything intact." Three separate claims, and the
+ * expensive one is the third: a run that quietly charged the player for dying would be
+ * invisible until somebody had lost an evening's gold to it.
+ *
+ * The last blow is a real enemy strike through the real damage path — `setHealth` only sets
+ * up the hit, because getting honestly from 100 health to nearly dead is several minutes of
+ * headless frames.
+ */
+const death = {}
+death.saveBefore = await readSave()
+
+// Face the door first: the combat section left the player aimed at a training dummy on the
+// far side of the room, and "forward" is wherever they are looking.
+await page.evaluate(() => window.__DCVR__.lookAt(0, 1.1, -6))
+await walkUntil(['KeyW'], async () => (await readFocus())?.id === 'foyer-door', 25)
+death.started = await openDoorAndStart()
+await walkUntil(['KeyD'], (p) => p.x > -0.15, 8)
+await page.evaluate(() => window.__DCVR__.lookAt(0, 1.1, -20))
+await walkUntil(['KeyW'], (p) => p.z < -6.8, 12)
+await page
+  .waitForFunction(() => window.__DCVR__?.run.phase === 'wave', { timeout: 12000 })
+  .catch(() => {})
+
+// In far enough to be found, then stand still and let something reach us.
+await walkUntil(['KeyW'], (p) => p.z < -16, 25)
+await page
+  .waitForFunction(() => (window.__DCVR__?.enemies.living ?? 0) > 0, { timeout: 40000 })
+  .catch(() => {})
+
+death.hpBeforeAnyHit = (await readEnemies())?.hp ?? null
+
+// Wait for one to actually hurt us — which is the check that an enemy's strike reaches the
+// player's health at all, and not through any back door.
+const hurtDeadline = Date.now() + 60000
+while (Date.now() < hurtDeadline) {
+  const now = await readEnemies()
+  if (now && now.hp < now.maxHp) break
+  await page.waitForTimeout(300)
+}
+death.hpAfterBeingHit = (await readEnemies())?.hp ?? null
+
+// One blow from dead. The blow itself is theirs.
+await page.evaluate(() => window.__DCVR__.setHealth(1))
+await page
+  .waitForFunction(() => window.__DCVR__?.run.phase === 'death', { timeout: 45000 })
+  .catch(() => {})
+death.runOnDeath = await readRun()
+
+// Death is the one forced move in the game: there is no walk home available from dead.
+await page
+  .waitForFunction(() => window.__DCVR__?.run.phase === 'foyer', { timeout: 15000 })
+  .catch(() => {})
+death.runAfter = await readRun()
+death.playerAfter = await readPlayer()
+death.saveAfter = await readSave()
+death.hpAfter = (await readEnemies())?.hp ?? null
+
+/**
  * Now the greybox, for the movement course. It is the only room with a staircase, a ramp
  * and a ledge in it, and the character controller's behaviour is invisible without them.
  */
@@ -608,6 +793,8 @@ info.shop = shop
 info.movement = movement
 info.dungeon = dungeon
 info.combat = combat
+info.wave = wave
+info.death = death
 info.settings = settings
 info.reset = reset
 
@@ -683,7 +870,10 @@ if (!foy.saveAtStart) {
     failures.push(`never reached the wave phase: ${JSON.stringify(foy.runInDungeon)}`)
   }
   if (foy.runOnClear?.phase !== 'waveComplete') {
-    failures.push(`returning to the foyer did not clear the wave: ${foy.runOnClear?.phase}`)
+    failures.push(`killing every enemy did not clear the wave: ${foy.runOnClear?.phase}`)
+  }
+  if (foy.runAfterWalkHome?.phase !== 'foyer') {
+    failures.push(`walking home did not end the run: ${foy.runAfterWalkHome?.phase}`)
   }
   // The payout, and the wave counter advancing. Both live in the save, so both are what a
   // reload has to bring back.
@@ -819,6 +1009,103 @@ else {
     if (Math.abs(sample.x) > 8 || Math.abs(sample.z) > 8 || sample.y < -0.5) {
       failures.push(`player left the level at ${label}: ${JSON.stringify(sample)}`)
     }
+  }
+}
+
+/**
+ * Sprint 2.3: the wave.
+ *
+ * The order of these matters if one fails. "Nothing spawned" makes every check below it
+ * meaningless, and "it spawned but never moved" is a different bug from "it moved but could
+ * not be killed" — so they are reported as themselves rather than as one failed loop.
+ */
+const wav = info.wave
+if (!wav.firstArrival || wav.firstArrival.total <= 0) {
+  failures.push('the wave director composed an empty wave')
+} else if ((wav.firstArrival.living ?? 0) === 0) {
+  failures.push(
+    `nothing arrived in the dungeon: ${JSON.stringify({
+      total: wav.firstArrival.total,
+      queued: wav.firstArrival.queued,
+    })}`,
+  )
+} else {
+  // It has to come *to* the player. Something that spawns and stays put is the failure mode
+  // of every part of this sprint at once — aggro, line of sight, pathing or the nav bake.
+  if (!wav.approachTo) {
+    failures.push('lost track of every enemy before one got close')
+  } else if (wav.approachTo.distance > 6) {
+    failures.push(
+      `nothing came within reach: nearest ${wav.approachTo.distance.toFixed(1)}m, phase ${wav.approachTo.phase}`,
+    )
+  }
+  if (wav.approachFrom && wav.approachTo && wav.approachTo.distance >= wav.approachFrom.distance) {
+    failures.push(
+      `enemies never closed the gap: ${wav.approachFrom.distance?.toFixed(1)}m -> ${wav.approachTo.distance.toFixed(1)}m`,
+    )
+  }
+  // An enemy is a damageable like any other: same registry, same swept segment, same
+  // applyDamage — and then counted and paid for by the director. Five links, any of which
+  // can be silently wrong while the wand still looks like it is firing.
+  if ((wav.afterFirstKill?.killed ?? 0) < 1) {
+    failures.push('the wand never killed an enemy')
+  }
+  if ((wav.afterFirstKill?.gold ?? 0) < 1) {
+    failures.push('a kill paid no gold')
+  }
+  if (!wav.onClear?.cleared) {
+    failures.push('the wave never reported itself cleared')
+  }
+  if (wav.onClear && wav.onClear.killed !== wav.onClear.total) {
+    failures.push(
+      `cleared with enemies unaccounted for: ${wav.onClear.killed}/${wav.onClear.total}`,
+    )
+  }
+  // The payout is the sum of what was killed, not a flat clear bonus. That is the whole
+  // reason the director owns the number.
+  if (wav.onClear && info.foyer.saveAfterWave && info.foyer.saveAtStart) {
+    const paid = info.foyer.saveAfterWave.gold - info.foyer.saveAtStart.gold
+    if (paid !== wav.onClear.gold) {
+      failures.push(`payout did not match the kills: paid ${paid}, earned ${wav.onClear.gold}`)
+    }
+  }
+}
+
+/** Sprint 2.3: death costs the wave and nothing else. */
+const die = info.death
+if (die.hpAfterBeingHit == null || die.hpAfterBeingHit >= (die.hpBeforeAnyHit ?? 0)) {
+  failures.push(
+    `enemies never damaged the player: ${die.hpBeforeAnyHit} -> ${die.hpAfterBeingHit}`,
+  )
+}
+if (die.started === false) {
+  failures.push('could not start a second wave for the death test')
+}
+if (die.runOnDeath?.phase !== 'death') {
+  failures.push(`losing all health did not end the run: ${die.runOnDeath?.phase}`)
+}
+if (die.runAfter?.phase !== 'foyer') {
+  failures.push(`death did not return the player to the foyer: ${die.runAfter?.phase}`)
+}
+if (die.playerAfter && die.playerAfter.z < 0) {
+  failures.push(`death left the player outside the foyer: z=${die.playerAfter.z}`)
+}
+if (die.hpAfter != null && die.hpAfter < 100) {
+  // Health comes back in the safe room and nowhere else — it does not regenerate during a
+  // wave, so a player who returned on three health would stay on three forever.
+  failures.push(`the player was not made whole on returning to the foyer: ${die.hpAfter}`)
+}
+if (die.saveBefore && die.saveAfter) {
+  // The claim worth testing, because losing to it is invisible until it has cost somebody an
+  // evening. Progression is pure RPG: dying takes the wave and not a coin.
+  if (die.saveAfter.gold !== die.saveBefore.gold) {
+    failures.push(`dying cost the player gold: ${die.saveBefore.gold} -> ${die.saveAfter.gold}`)
+  }
+  if (die.saveAfter.weapons.join() !== die.saveBefore.weapons.join()) {
+    failures.push('dying cost the player a weapon')
+  }
+  if (die.saveAfter.wave !== die.saveBefore.wave) {
+    failures.push(`dying moved the wave counter: ${die.saveBefore.wave} -> ${die.saveAfter.wave}`)
   }
 }
 

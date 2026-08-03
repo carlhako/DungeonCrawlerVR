@@ -36,6 +36,19 @@ export type RunEvent =
   /** Leaving the end-of-wave state, back to the shop. */
   | 'return'
 
+/**
+ * What an event carries with it.
+ *
+ * Only `cleared` uses it, and only for the payout. Deliberately a payload on the event rather
+ * than a number the store reaches out for: the Wave Director knows what the player killed and
+ * the run machine does not, and inverting that would have this file importing the director,
+ * the enemy pool and the enemy table to answer a question it is being told the answer to.
+ */
+export interface RunEventDetail {
+  /** Gold earned during the wave, from the Wave Director. */
+  earned?: number
+}
+
 const TRANSITIONS: Record<RunPhase, Partial<Record<RunEvent, RunPhase>>> = {
   foyer: { enterDoor: 'loading' },
   // No `died` here: nothing can hurt the player while the dungeon is still being built.
@@ -51,15 +64,19 @@ export function nextPhase(phase: RunPhase, event: RunEvent): RunPhase | null {
 }
 
 /**
- * Gold for clearing a wave.
+ * What the player is paid for a wave, given what they killed.
  *
- * A placeholder curve until the Wave Director in Sprint 2.3 pays out per enemy killed, which
- * is where the number should actually come from — killing things is what earns gold, and a
- * flat clear bonus rewards hiding in a corner until the timer runs out. Deliberately generous
- * enough that two waves buy something in the Sprint 1.3 shop, so the loop is testable.
+ * As of Sprint 2.3 the number comes from the Wave Director — the sum of the gold each dead
+ * enemy was worth — and this is only the floor under it. A flat clear bonus was the placeholder
+ * from 1.2 and it had the wrong incentive in it: it paid the same for fighting through a wave
+ * as for hiding in a corridor until the last thing wandered off. What remains is a small
+ * consolation so that a wave finished with a lucky environmental kill still pays *something*,
+ * which matters mostly for the greybox and the smoke test.
  */
-export function waveReward(wave: number): number {
-  return 25 + 10 * Math.max(0, wave - 1)
+export const MINIMUM_REWARD = 5
+
+export function waveReward(earned: number): number {
+  return Math.max(MINIMUM_REWARD, Math.round(earned))
 }
 
 /** Human-readable phase, for the foyer status board. */
@@ -93,7 +110,7 @@ interface RunStore {
    * every fixed step — can call this freely and check the boolean, rather than each of them
    * having to know the current phase.
    */
-  send(event: RunEvent): boolean
+  send(event: RunEvent, detail?: RunEventDetail): boolean
   /** Back to a fresh foyer without touching the save. For tests and the dev panel. */
   reset(): void
 }
@@ -107,8 +124,8 @@ export const useRun = create<RunStore>()((set, get) => ({
   wavesStarted: 0,
   lastReward: 0,
 
-  send: (event) => {
-    const { phase, wave } = get()
+  send: (event, detail) => {
+    const { phase } = get()
     const next = nextPhase(phase, event)
     if (!next) {
       console.warn(`[run] ignored "${event}" — not legal from "${phase}"`)
@@ -126,7 +143,7 @@ export const useRun = create<RunStore>()((set, get) => ({
         return true
       }
       case 'waveComplete': {
-        const reward = waveReward(wave)
+        const reward = waveReward(detail?.earned ?? 0)
         useGame.getState().clearWave(reward)
         set({ phase: next, lastReward: reward })
         return true

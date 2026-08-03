@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { STARTER_WEAPON } from '@/data/weapons'
 import { useGame } from './game'
 import { newSave, type SaveData } from './save'
-import { nextPhase, phaseLabel, useRun, waveReward, type RunPhase } from './run'
+import { MINIMUM_REWARD, nextPhase, phaseLabel, useRun, waveReward, type RunPhase } from './run'
 
 /**
  * The run machine, and the wiring between it and the save.
@@ -65,13 +65,16 @@ describe('nextPhase', () => {
 })
 
 describe('waveReward', () => {
-  it('rises with the wave', () => {
-    expect(waveReward(1)).toBeLessThan(waveReward(2))
-    expect(waveReward(2)).toBeLessThan(waveReward(10))
+  it('pays what the player earned', () => {
+    // Per kill, from the Wave Director. A flat clear bonus pays the same for fighting through
+    // a wave as for hiding in a corridor until the last thing wanders off.
+    expect(waveReward(64)).toBe(64)
+    expect(waveReward(120)).toBeGreaterThan(waveReward(64))
   })
 
-  it('pays something for the first wave', () => {
-    expect(waveReward(1)).toBeGreaterThan(0)
+  it('never pays nothing', () => {
+    expect(waveReward(0)).toBe(MINIMUM_REWARD)
+    expect(waveReward(0)).toBeGreaterThan(0)
   })
 })
 
@@ -90,10 +93,10 @@ describe('the run store', () => {
     expect(useRun.getState().wavesStarted).toBe(1)
 
     useRun.getState().send('loaded')
-    useRun.getState().send('cleared')
+    useRun.getState().send('cleared', { earned: 42 })
 
     expect(useRun.getState().phase).toBe('waveComplete')
-    expect(useGame.getState().save.gold).toBe(before + waveReward(1))
+    expect(useGame.getState().save.gold).toBe(before + waveReward(42))
     expect(useGame.getState().save.wave).toBe(2)
   })
 

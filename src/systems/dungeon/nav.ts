@@ -123,6 +123,58 @@ function retrace(cameFrom: Int32Array, start: number, goal: number, width: numbe
 }
 
 /**
+ * Can `from` see `to` across open floor?
+ *
+ * Aggro asks this before it wakes anything up, and it is the difference between a dungeon
+ * that has things living in it and a dungeon wired with trip-wires. Something that charges
+ * you through two walls because you came within eleven metres of it is not hunting you — and
+ * the player, who cannot see it happen, only learns that the level reacts to their position
+ * rather than to their presence.
+ *
+ * A supercover walk: every cell the line between the two centres passes through is tested,
+ * including both cells it clips when it crosses a corner exactly. That last case is why this
+ * is not the obvious Bresenham loop — a diagonal squeezing between two wall corners is a
+ * sightline through solid rock, and it is the same corner-cutting rule `findPath` refuses.
+ */
+export function hasLineOfSight(nav: NavGrid, from: Cell, to: Cell): boolean {
+  let x = from.x
+  let y = from.y
+  if (!isOpen(nav, x, y)) return false
+
+  const stepX = Math.sign(to.x - from.x)
+  const stepY = Math.sign(to.y - from.y)
+  let ax = Math.abs(to.x - from.x)
+  let ay = Math.abs(to.y - from.y)
+
+  let steps = ax + ay
+  let error = ax - ay
+  ax *= 2
+  ay *= 2
+
+  while (steps > 0) {
+    if (error > 0) {
+      x += stepX
+      error -= ay
+    } else if (error < 0) {
+      y += stepY
+      error += ax
+    } else {
+      // Dead through the corner. Both cells beside it have to be open, or the line is
+      // threading a gap that nothing can see through.
+      if (!isOpen(nav, x + stepX, y) || !isOpen(nav, x, y + stepY)) return false
+      x += stepX
+      y += stepY
+      error += ax - ay
+      steps -= 1
+    }
+    steps -= 1
+    if (!isOpen(nav, x, y)) return false
+  }
+
+  return true
+}
+
+/**
  * The nearest cell a body may stand in, searched outwards.
  *
  * Physics puts things where physics puts them, and a body resting a few centimetres inside a

@@ -7,18 +7,27 @@ sprint, before committing. The roadmap itself lives in [PLAN.md](PLAN.md).
 
 ## Current position
 
-> **Epics 0 and 1 are signed off on the Quest 3, and so is Sprint 2.1 and Sprint 2.2 — the
-> weapon & attack framework. Sprint 2.3 — enemies, AI and the wave loop — is next.**
+> **Epics 0 and 1 are signed off on the Quest 3, and so are Sprints 2.1 and 2.2. Sprint 2.3 —
+> enemies, AI and the wave loop — is written and green on the desktop, and is waiting on a
+> Quest 3 pass. Sprint 2.4 — hit feedback & VFX — is next.**
 >
-> There are weapons in your hands now, and three training dummies in the foyer to try them
-> on. The Emberwand throws arcing fire bolts that cost mana and set things burning; the
-> Frostbrand cuts when you actually swing it and chills what it hits. Damage numbers come off
-> everything you land.
+> **There is something in the dungeon now.** Open the door, walk down the passage into the
+> generated level, and a wave composed from the wave number comes looking for you: Goblin
+> Skulkers that hit and back off, Skeleton Warriors that plant and telegraph a swing you can
+> step out of, and — from wave three — Wraiths, which ignore the walls entirely. They arrive
+> out of sight and out of reach, a few seconds apart, and they path around the level rather
+> than through it.
 >
-> Opening the foyer door leads down the passage into a generated dungeon: rooms and
-> corridors, torch-lit, dark between the torches, different every wave and identical for the
-> same wave. There is still nothing in it to fight — that is 2.3 — so walking back into the
-> foyer still counts as clearing the wave.
+> The wave is over when everything in it is dead, and it pays what you actually killed. Then
+> you walk home; nothing teleports you. You can retreat into the foyer mid-wave — it is the
+> safe room, and health only comes back there — but the wave will still be waiting.
+>
+> You can also die now. Dying costs the wave and nothing else: you come back to the foyer
+> whole, with exactly the gold, weapons and wave number you left with.
+>
+> The weapons are the Sprint 2.2 pair, unchanged: the Emberwand throws arcing fire bolts that
+> cost mana and set things burning; the Frostbrand cuts when you actually swing it, chills
+> what it hits, and interrupts a wind-up if you land it hard enough.
 >
 > The meta loop it hangs off is complete and verified: 100 gold, buy and equip a weapon at
 > the shop board, set your comfort options on the wall without taking the headset off, open
@@ -40,7 +49,7 @@ sprint, before committing. The roadmap itself lives in [PLAN.md](PLAN.md).
 | | 1.4 In-world options & new game | ✅ Verified on Quest 3 |
 | **2 — Wave Combat Core** | 2.1 Procedural dungeon generation | ✅ Verified on Quest 3 |
 | | 2.2 Weapon & attack framework | ✅ Verified on Quest 3 |
-| | 2.3 Enemies, AI & wave loop | ⬜ |
+| | 2.3 Enemies, AI & wave loop | 🟡 Desktop green — Quest 3 pass outstanding |
 | | 2.4 Hit feedback & VFX | ⬜ |
 | **3 — Fear & Atmosphere** | 3.1 Darkness & lighting | ⬜ |
 | | 3.2 Spatial audio | ⬜ |
@@ -827,6 +836,135 @@ Known scaffolding, and the gaps:
   pulse and a hit flash.
 - Purchase and combat **audio is Sprint 3.2**, as it has been since 1.3.
 - The dummies are primitives, like everything else. Still no CC0 art kit.
+
+### 🟡 Sprint 2.3 — Enemies, AI & the wave loop
+
+**Verified on desktop:** typecheck clean · 602/602 unit tests · production build succeeds ·
+smoke test plays the whole loop — out of the door, into the generated level, waits for the
+wave to arrive, checks it *closed the gap* rather than idling where it spawned, kills one with
+the wand, clears the rest, walks home, and checks the payout is exactly the sum of what died.
+Then it goes back out, gets hit by a real enemy, dies to one, and checks it came back to the
+foyer whole with exactly the gold, weapons and wave number it left with.
+
+**Not yet verified on the Quest 3.** The headset checklist is README items 16 and 17, and the
+one thing on it that cannot be judged at a desk is the telegraph: whether the wind-up is
+actually readable from across a dark room, and whether you can step out of a swing. That is
+the whole design of this sprint and a monitor cannot answer it.
+
+Delivered — the rules, all pure and unit-tested, none of them importing three.js:
+
+- `src/data/enemies.ts` — three enemies that are three *different problems*, not three sets of
+  numbers. The Skulker hits and leaves; the Warrior plants and telegraphs; the Wraith walks
+  through the walls.
+- `src/data/waves.ts` — a budget and a cost per enemy rather than a hand-written roster, so
+  wave seventeen composes itself. 36 tests.
+- `src/systems/enemies/ai.ts` — the state machine: spawning, idle, chase, telegraph, strike,
+  recover, stagger, dying. 32 tests, shared with the pool.
+- `src/systems/enemies/steering.ts` — path following, separation, wall sliding and turn rate,
+  as arithmetic over numbers. 25 tests.
+- `src/systems/enemies/pool.ts` — every enemy that can exist, allocated once.
+- `src/systems/waves.ts` — the Wave Director: composition, staggered spawning, the clear
+  condition, and gold per kill. 16 tests.
+- `src/systems/vitals.ts` — the player's health, invulnerability frames and death. 11 tests.
+- `src/systems/dungeon/nav.ts` — `hasLineOfSight`, a supercover walk that refuses to thread a
+  wall corner, the same way `findPath` does. 7 tests.
+
+And the wiring:
+
+- `src/systems/EnemyDriver.tsx` — the ordering, at `SystemOrder.AI`: begin or end the wave,
+  spawn, decide, move, strike, bury, then ask whether it is over.
+- `src/entities/Enemies.tsx` — one group per pool slot, mounted once.
+- `src/entities/WeaponRig.tsx` — a health bar beside the mana bar, on every weapon.
+- `src/ui/ComfortVignette.tsx` — the same head-locked dome now carries the hurt flash.
+- `src/systems/run.ts` — `cleared` takes what the player earned; `waveReward` is a floor
+  under it rather than a curve.
+- `src/systems/RunDriver.tsx` — lost the placeholder clear condition it has carried since 1.2.
+
+Decisions made during the sprint:
+
+- **The telegraph is the whole design.** Every other number in `enemies.ts` is in service of
+  the wind-up existing and being legible: an enemy plants, does not move, rears back, and
+  flares its eyes before it commits. An enemy without one is not difficult, it is arbitrary —
+  damage arrives with no preceding information, and in VR being hurt by something you had no
+  chance to read is precisely what makes people take the headset off. It gets three separate
+  visual channels because one of them will be invisible in a dark corridor.
+- **The reach check happens on the strike step, not at the start of the wind-up.** The player
+  has had the whole telegraph to leave; a blow that lands because a range check ran a second
+  ago is exactly the unfair damage the telegraph exists to prevent.
+- **Aggro is reaction; hunting is intent.** Seeing the player inside the aggro radius, or being
+  shot, turns an enemy on you immediately — with a real line-of-sight test, so a level does not
+  read as a set of trip-wires. But nothing here is ambient: every enemy is placed by the
+  director as part of a wave the player has to clear. Left to line of sight alone they idle
+  sixty metres away forever and the only way to finish a wave is to go room to room looking for
+  them. So an idle enemy starts hunting a couple of seconds later regardless. Found by walking
+  the level headlessly and watching two skeletons stand still for forty-five seconds.
+- **They come from near the player, not from the deep end.** `map.spawns` is sorted
+  furthest-from-the-entry first, and taking the front of it put wave one's skeletons in the far
+  corner of a forty-cell level — a hundred and ten metres of corridor at 1.5 m/s, which is a
+  minute and a half of standing in an empty dungeon waiting for a fight. The pathfinding was
+  right the whole time and the geography was absurd. Spawns are now the nearest candidate that
+  is at least nine metres away **and out of line of sight**, capped at twenty-six. Something
+  that fades into existence while you are looking at it is not frightening, it is a spawner.
+- **Enemies are not rigid bodies.** A dozen Rapier character controllers stepping against a few
+  hundred wall colliders is most of a Quest's frame, for movement the nav bake already
+  describes. They move kinematically and ask the grid whether where they are going is floor —
+  which has the useful side effect that nothing can be shoved through a wall by an impulse,
+  because there are none.
+- **The wave clears when everything is dead, not when the player walks back.** That was the
+  placeholder from 1.2 and it made the foyer an exit rather than a refuge. Retreating is now
+  allowed and always was — the foyer is the safe room, health only comes back there — it just
+  does not finish anything, so eventually you have to come out.
+- **After clearing, you walk home.** The level stays standing and empty until the player is
+  back in the foyer. Sprint 2.1 built the whole passage so that nobody is ever teleported into
+  a dungeon; teleporting them *out* of one the instant the fight ends gives that back for
+  nothing. Death is the single exception, and the only forced camera move in the game: there is
+  no walk home available from dead.
+- **The payout is per kill.** A flat clear bonus pays the same for fighting through a wave as
+  for hiding in a corridor until the last thing wanders off, and it makes the shop's prices
+  meaningless once the wave count outruns the difficulty.
+- **Invulnerability frames, because three enemies reach you on the same fixed step.** Without
+  them a pack deals 3×18 in sixteen milliseconds, which is not difficulty — it is a player with
+  nothing to react to. Half a second, which is deliberately shorter than the fastest enemy's
+  recovery so a single attacker is still dangerous.
+- **Health is restored in the foyer and nowhere else.** Regeneration during a wave rewards
+  backing into a corridor and waiting, which is the least interesting thing a player can do in
+  a horror game.
+- **Enemy damage goes through `resolveDamage` and then into `vitals.ts`, not `applyDamage`.**
+  The player is deliberately *not* in the damageable registry: they would be swept by their own
+  projectiles and cut by their own sword, and a floating damage number would appear inside their
+  face. So the element, resistance and rounding rules are shared and the landing is not.
+- **A wave that has never started looks exactly like one that has finished** — empty queue,
+  nothing spawned, nothing alive. The director needs an explicit `running` flag, and without it
+  the very first wave the player ever opens the door on ends on the step it begins. Which is
+  what it did, for one memorable headless run.
+- **React effects are the wrong place to react to a phase change made inside the fixed loop.**
+  The wave used to be started by a `useEffect` watching the run phase, which does not run until
+  React has re-rendered — at least a frame, and possibly several fixed steps, later. Every wave
+  therefore ran its first steps against a director that had not been started. Reacting to the
+  transition on the same step it happens is the only ordering that is actually true.
+- **No health bars on enemies.** Three floating red bars advancing down a corridor is a
+  strategy game. The player already learns what they did from the damage numbers and the hit
+  flash; the training dummies keep their bars because a dummy exists to be measured against.
+- **Nothing about being hit moves the camera.** No shake, no knockback, no forced turn — the
+  feedback is haptics in both hands and red at the edge of vision, drawn on the *same*
+  head-locked dome as the comfort vignette, because there is exactly one thing allowed to sit
+  between the player's eyes and the world.
+
+Known scaffolding, and the gaps:
+
+- **Still no CC0 art kit.** PLAN.md had GLTF models with Mixamo clips landing here. Enemies are
+  primitives, like the foyer, the dungeon, the weapons and the dummies before them. What is not
+  deferred is the job those animations were there to do: every AI state is readable at a
+  distance. Swapping in a kit is a change to `EnemyShape` alone.
+- **`three-mesh-bvh` is still unused,** for the same reason it was in 2.2 — there are no enemy
+  meshes to build one over. Hit spheres plus swept segments remain both cheaper and simpler.
+- **No loot drops.** Gold is paid on death rather than dropped as a pickup. A pickup is an
+  interactable, a physics body and a VFX, and all three belong with the rest of the feel work.
+- Impact VFX, hitstop and the dissolve are **Sprint 2.4**, as they have been since 2.2. A dying
+  enemy currently falls over and sinks into the floor.
+- **Audio is Sprint 3.2**, as it has been since 1.3 — which costs more here than anywhere so
+  far. Half of what makes something behind you frightening is hearing it.
+- The light budget still does not know enemies exist. **Sprint 3.1** owns that.
 
 ---
 

@@ -4,6 +4,7 @@ import { BackSide, Matrix4, Mesh, ShaderMaterial, SphereGeometry } from 'three'
 import { damp, vignetteTarget } from '@/systems/locomotion'
 import { playerState } from '@/systems/player'
 import { useSettings } from '@/systems/settings'
+import { playerVitals } from '@/systems/vitals'
 
 /**
  * The comfort vignette: narrows the field of view while the player is being moved by
@@ -19,6 +20,14 @@ import { useSettings } from '@/systems/settings'
  * vignette edge in different places, which the visual system reads as an object floating in
  * front of the face. Every point on a dome is equidistant, so there is nothing to converge
  * on and it reads as an absence of light rather than a thing.
+ *
+ * As of Sprint 2.3 it carries a second job: **being hit**. Red at the edge of vision, on the
+ * same dome and through the same shader, because there is exactly one thing in this game
+ * allowed to sit between the player's eyes and the world and adding a second would be two
+ * transparent surfaces fighting over the depth buffer. Nothing in VR may move the camera —
+ * no shake, no knockback, no forced turn — so this and the haptics are the whole of what
+ * damage does to the view. Unlike the comfort vignette it is *not* VR-only: a monitor has no
+ * vestibular conflict to mask, but it does need to be told the player is being hurt.
  */
 
 /** Radius in metres. Well inside the near plane of anything else in the scene. */
@@ -48,6 +57,7 @@ const vertexShader = /* glsl */ `
 
 const fragmentShader = /* glsl */ `
   uniform float uAmount;
+  uniform float uHurt;
   uniform float uCosInner;
   uniform float uCosOuter;
   varying vec3 vLocal;
@@ -56,7 +66,15 @@ const fragmentShader = /* glsl */ `
     // The dome is head-locked, so its local -Z is straight ahead.
     float alignment = dot(normalize(vLocal), vec3(0.0, 0.0, -1.0));
     float alpha = 1.0 - smoothstep(uCosOuter, uCosInner, alignment);
-    gl_FragColor = vec4(0.0, 0.0, 0.0, alpha * uAmount);
+
+    float dark = alpha * uAmount;
+    // The hurt flash reaches further in than the comfort tunnel does — it is meant to be
+    // noticed rather than to go unnoticed, which is the exact opposite of the vignette's job.
+    float hurtAlpha = alpha * uHurt * 0.85;
+
+    float total = clamp(dark + hurtAlpha, 0.0, 1.0);
+    vec3 colour = total > 0.0001 ? vec3(0.55, 0.03, 0.02) * (hurtAlpha / total) : vec3(0.0);
+    gl_FragColor = vec4(colour, total);
   }
 `
 
@@ -77,6 +95,7 @@ export function ComfortVignette() {
         fragmentShader,
         uniforms: {
           uAmount: { value: 0 },
+          uHurt: { value: 0 },
           uCosInner: { value: Math.cos((INNER_DEGREES * Math.PI) / 180) },
           uCosOuter: { value: Math.cos((OUTER_DEGREES * Math.PI) / 180) },
         },
@@ -120,7 +139,14 @@ export function ComfortVignette() {
 
     const uAmount = material.uniforms.uAmount
     if (uAmount) uAmount.value = amount.current
-    dome.visible = amount.current > 0.001
+
+    // Read straight off the vitals rather than damped: a hit is punctuation, and `hurt`
+    // already decays on its own over `HURT_SECONDS`.
+    const hurt = playerVitals.hurt
+    const uHurt = material.uniforms.uHurt
+    if (uHurt) uHurt.value = hurt
+
+    dome.visible = amount.current > 0.001 || hurt > 0.001
     if (!dome.visible) return
 
     // Read the *XR* camera when presenting: three updates it from the frame's pose at the

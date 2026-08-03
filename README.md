@@ -160,9 +160,10 @@ Enter VR and confirm, in order:
    come with you: walk into a wall and the view fades out rather than letting you see
    through it, and it should come back as you step away.
 10. **The run loop** — the board by the door reads `Gold 100` and `Wave 1 awaits`. Open the
-    door, walk out through the doorway and back in: the wave clears, the board shows the
-    payout, and you are handed back to the foyer on the next wave with more gold. Reload the
-    page and both must still be there.
+    door and walk out; the wave begins. Clearing it means killing everything in it (item 17),
+    after which you **walk back** into the foyer yourself — nothing teleports you. The board
+    then shows the payout and the next wave, with more gold. Reload the page and both must
+    still be there.
 11. **The shop** — walk to the counter, then stand back a step. Point at a weapon on the
     board with either hand and pull the trigger; the beam should reach it and aiming anywhere
     along a button, not just at its centre, should work. Then reach out and press a button
@@ -219,7 +220,41 @@ Enter VR and confirm, in order:
     should fade the same way in reverse; it should never fade partway and then cut out. If
     either still looks wrong, report it — ideally which part (the onset, the overall speed, or
     a sudden cutoff) and roughly how far you were from the torch.
-16. **Starting over** — turn around. The "new game" plaque is on the back wall behind the
+16. **The wave** — walk a little way into the level and wait. Nothing should be waiting at the
+    door: the first thing arrives after a few seconds, and the rest are spaced out rather than
+    dropped on you at once.
+    - **Where they come from.** Nothing should fade into existence while you are looking at
+      it, or inside arm's reach. They should come *out of* the dark from somewhere you were
+      not watching. If one appears in front of your face, that is a bug and an unpleasant one.
+    - **They should come to you.** Stand still. Within a few seconds of arriving, everything
+      in the wave should be walking towards you, and it should route around walls rather than
+      grinding along them. Something that stands where it spawned, or that gets stuck on a
+      corner, is worth reporting with roughly where it was.
+    - **The wind-up.** This is the single most important thing to judge in the headset, because
+      it is the whole of what makes being hit fair. Let a **Skeleton Warrior** — the big pale
+      one — reach you and *watch* it. It should plant, rear back and take a clear beat before
+      it swings, with its eyes flaring as it commits. **You should be able to step back out of
+      that swing.** If you cannot read the wind-up, or you get hit with no warning, say so —
+      that is not difficulty, it is the thing this sprint exists to prevent.
+    - **The Goblin Skulker** — small, green, fast — should hit you and immediately back off
+      rather than standing and trading. One is an annoyance; three at once should feel like
+      being circled.
+    - **Interrupting.** Hit something hard, with the Frostbrand, *while it is winding up*. It
+      should flinch and lose the swing. A heavy hit that does not interrupt is worth reporting.
+    - **Health.** There is a red bar on whatever you are holding, next to the mana bar. It
+      should go down when you are hit, and the edge of your vision should flash red — **and
+      nothing should move your view.** No shake, no shove, no forced turn. If being hit moves
+      the camera by so much as a nudge, that is the hard comfort rule broken and it beats
+      everything else on this list.
+17. **Clearing it, and dying** — kill everything. The wave ends when the last one dies, not
+    when you walk back, so you can retreat into the foyer to catch your breath and the wave
+    will still be waiting when you come out. Once it is clear, walk home: the level stays
+    standing and empty until you are back in the foyer, and the payout should be the sum of
+    what you actually killed.
+    Then go back out and let something kill you. You should be put back in the foyer whole,
+    with **exactly** the gold, weapons and wave number you left with. Dying costs the wave and
+    nothing else.
+18. **Starting over** — turn around. The "new game" plaque is on the back wall behind the
     spawn. One press arms it and it says so; a second wipes gold, weapons and upgrades back
     to a first launch. Leave it armed and walk away — it must stand down by itself. Then
     check the settings board: your comfort options must *not* have been wiped with it.

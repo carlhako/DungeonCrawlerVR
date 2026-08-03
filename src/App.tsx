@@ -13,11 +13,13 @@ import { Foyer } from '@/scenes/Foyer'
 import { GreyboxRoom } from '@/scenes/GreyboxRoom'
 import { XRDiagnostics } from '@/scenes/XRDiagnostics'
 import { CombatDriver } from '@/systems/CombatDriver'
+import { EnemyDriver } from '@/systems/EnemyDriver'
 import { InteractionDriver } from '@/systems/InteractionDriver'
 import { RunDriver } from '@/systems/RunDriver'
 import { InteractPrompt } from '@/ui/InteractPrompt'
 import { DamageNumbers } from '@/ui/DamageNumbers'
 import { PlayerRig } from '@/entities/PlayerRig'
+import { Enemies } from '@/entities/Enemies'
 import { Projectiles } from '@/entities/Projectiles'
 import { TeleportAim } from '@/entities/Teleport'
 import { DesktopWeaponRig } from '@/entities/WeaponRig'
@@ -103,6 +105,10 @@ function World() {
       {/* Combat needs the physics world for its projectile raycasts, so it lives inside
           <Physics> with everything else that does. */}
       <CombatDriver />
+      {/* Enemies decide at SystemOrder.AI, before physics and combat, so a wind-up resolves
+          against the position the player finished this step at. */}
+      <EnemyDriver />
+      <Enemies />
       <DesktopWeaponRig />
       <Projectiles />
       <DamageNumbers />
