@@ -112,7 +112,8 @@ Enter VR and confirm, in order:
 
 1. **Stereo** — the room has depth, and the 1.7m scale-reference column reads as roughly
    your own height. If it looks like a doll's house or a cathedral, the metre scale is wrong.
-2. **Tracking** — both controller models are visible and follow your hands, each with a ray.
+2. **Tracking** — both controller models are visible and follow your hands, each with a
+   single dim beam that stays welded to the hand as you move.
 3. **Input** — the diagnostics panel in front of the spawn point has one column per hand.
    Squeeze the trigger and grip (bars fill proportionally), press A/B and X/Y (lamps light),
    and push the thumbstick (the dot follows it). The bar at the top of each column is lit
@@ -146,6 +147,9 @@ Enter VR and confirm, in order:
     which must never steal the press. Buy something you can afford, put it in each hand in
     turn, and try to buy something you cannot — the refusal has to say why. Every purchase
     must survive a reload.
+12. **Starting over** — turn around. The "new game" plaque is on the back wall behind the
+    spawn. One press arms it and it says so; a second wipes gold, weapons and upgrades back
+    to a first launch. Leave it armed and walk away — it must stand down by itself.
 
 ### Comfort
 
@@ -253,6 +257,10 @@ the next VR entry.
   The pointer beam hangs off that same space rather than being positioned from it: a tracked
   pose read from `matrixWorld` is a frame old, and a beam a frame behind the hand reads as a
   second beam trailing the first. Parent to a pose, don't chase it.
+- **The one destructive control takes two presses** (`src/systems/reset.ts`). Wiping the
+  save is the only thing here that cannot be earned back, and the player's entire vocabulary
+  is "point at a thing and pull the trigger" — one twitch. The plaque arms, says what the
+  next press does, and stands down on its own.
 - **Text is rasterised on a canvas** (`src/ui/label.ts`), not fetched as a font. SDF text
   libraries pull a default font from a CDN on first use, and a dungeon that silently loses
   all its text when the network hiccups is not a trade worth making.

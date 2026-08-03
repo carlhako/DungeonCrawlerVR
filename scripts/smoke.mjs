@@ -416,6 +416,29 @@ movement.leftTheGround = sawAirborne
 await page.waitForTimeout(1200)
 movement.landed = await readPlayer()
 
+/**
+ * The reset plaque, last — because it destroys everything the tests above built.
+ *
+ * The assertion that matters is the one in the middle: after the *first* press the save is
+ * still exactly as it was. A reset that fires on a single trigger pull is a bug that costs a
+ * player their evening, and it is the kind that only shows up once, in the headset, for real.
+ */
+await page.goto(URL, { waitUntil: 'networkidle' })
+await page.waitForFunction(() => window.__DCVR__?.player != null, { timeout: 15000 })
+await page.waitForTimeout(500)
+
+const reset = {}
+reset.saveBefore = await readSave()
+// It is on the back wall, behind the spawn — so this also proves a player who turns around
+// can find it. The ray only reaches 3.5m, same as any other interactable.
+await page.evaluate(() => window.__DCVR__.lookAt(-2.6, 1.5, 5.82))
+reset.walkOver = await walkUntil(['KeyW'], (p) => p.z > 3.2 && p.x < -1.6, 15)
+
+reset.armFocus = await pressButton('reset-game')
+reset.saveAfterArm = await readSave()
+reset.confirmFocus = await pressButton('reset-game')
+reset.saveAfterWipe = await readSave()
+
 mkdirSync(OUT, { recursive: true })
 await page.screenshot({ path: `${OUT}/smoke.png` })
 await browser.close()
@@ -423,6 +446,7 @@ await browser.close()
 info.foyer = foyer
 info.shop = shop
 info.movement = movement
+info.reset = reset
 
 const results = { ...info, consoleErrors }
 console.log(JSON.stringify(results, null, 2))
@@ -632,6 +656,34 @@ else {
     if (Math.abs(sample.x) > 8 || Math.abs(sample.z) > 8 || sample.y < -0.5) {
       failures.push(`player left the level at ${label}: ${JSON.stringify(sample)}`)
     }
+  }
+}
+
+const rst = info.reset
+if (!rst.armFocus || rst.armFocus.id !== 'reset-game') {
+  failures.push('the reset plaque was never focused — is it registered on the back wall?')
+} else {
+  // The whole point of the two-step: one press must change nothing at all.
+  if (rst.saveAfterArm?.gold !== rst.saveBefore?.gold) {
+    failures.push(
+      `arming the plaque changed the gold: ${rst.saveBefore?.gold} -> ${rst.saveAfterArm?.gold}`,
+    )
+  }
+  if ((rst.saveAfterArm?.weapons ?? []).length !== (rst.saveBefore?.weapons ?? []).length) {
+    failures.push('arming the plaque wiped weapons — it must take two presses')
+  }
+  if (rst.saveAfterWipe?.gold !== 100) {
+    failures.push(`reset did not restore the starting gold: ${rst.saveAfterWipe?.gold}`)
+  }
+  if (JSON.stringify(rst.saveAfterWipe?.weapons) !== JSON.stringify(['emberwand'])) {
+    failures.push(
+      `reset left weapons behind: ${JSON.stringify(rst.saveAfterWipe?.weapons)}`,
+    )
+  }
+  if (rst.saveAfterWipe?.wave !== 1 || rst.saveAfterWipe?.bestWave !== 0) {
+    failures.push(
+      `reset did not rewind the wave counters: ${JSON.stringify(rst.saveAfterWipe)}`,
+    )
   }
 }
 

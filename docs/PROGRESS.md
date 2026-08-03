@@ -7,8 +7,12 @@ sprint, before committing. The roadmap itself lives in [PLAN.md](PLAN.md).
 
 ## Current position
 
-> **Sprint 1.3 is built; three Quest 3 passes have each found defects in the shop and its
-> pointer, all now fixed — awaiting a fourth headset pass.**
+> **Sprint 1.3 is signed off on the Quest 3. Epic 1 is complete and verified.**
+>
+> Three headset passes each found something — spherical picking on flat buttons, a duplicate
+> pointer aimed from the wrong pose, a beam a frame behind the hand — and all of it is fixed
+> and checked in the headset. A "new game" plaque on the foyer's back wall wipes progression
+> when you want to start over.
 >
 > Epic 1 is now complete end to end: start with 100 gold, buy and equip a weapon at a board
 > on the shop counter, open the door, clear a wave, come back richer and spend it. All of it
@@ -29,7 +33,7 @@ sprint, before committing. The roadmap itself lives in [PLAN.md](PLAN.md).
 | | 0.3 Movement & physics | ✅ Done |
 | **1 — Foyer & Meta Loop** | 1.1 Foyer scene & interaction | ✅ Done |
 | | 1.2 Game state & persistence | ✅ Done |
-| | 1.3 Shop & weapon dialog | 🟨 Headset defects fixed — awaiting re-test |
+| | 1.3 Shop & weapon dialog | ✅ Verified on Quest 3 |
 | **2 — Wave Combat Core** | 2.1 Procedural dungeon generation | ⬜ Next |
 | | 2.2 Weapon & attack framework | ⬜ |
 | | 2.3 Enemies, AI & wave loop | ⬜ |
@@ -406,12 +410,12 @@ to a tracked pose should be parented to it, not positioned from it** — the sam
 teleport arc breaks deliberately, because that geometry has to stay in the world while the
 player teleports out from under it.
 
-**Verified on desktop:** typecheck clean · 242/242 unit tests · production build succeeds ·
+**Verified on desktop:** typecheck clean · 252/252 unit tests · production build succeeds ·
 smoke test buys and equips a weapon *through the panel* — walking to the counter, aiming at
 each button, pressing the key — including a purchase it cannot afford, then reloading the
 page and finding the gold, the weapon, the loadout and the wave number all still there.
 
-**Awaiting a Quest 3 pass.** What to check, in the headset:
+**Verified on the Quest 3 (2026-08-03), on the fourth pass.** What was checked:
 
 1. Walk to the counter. The board reads your gold, the three weapons and what you own.
 2. **Stand back a step and point** at a weapon row, with either hand, and pull the trigger.
@@ -441,6 +445,13 @@ Delivered:
 - `src/systems/interaction.ts` — a `proximity` opt-out, a corrected focus precedence, and
   rectangular (`surface`) picking for anything flat.
 - `src/ui/PointerBeam.tsx` — the line out of each controller that shows where you are aiming.
+- `src/systems/reset.ts` + `src/ui/ResetPlaque.tsx` — the "new game" plaque, added after
+  sign-off. A board on the foyer's back wall that wipes gold, weapons, upgrades and wave
+  counters back to a first launch. **Two presses:** the first arms it and says what the
+  second one will do, and it stands down on its own after six seconds. Settings are not
+  touched — comfort options are about the person, not the run. 10 tests on the arming
+  machine, and a smoke step whose central assertion is that the *first* press changes
+  nothing at all.
 
 Decisions made during the sprint:
 

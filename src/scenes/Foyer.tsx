@@ -6,6 +6,7 @@ import { useFixedUpdate } from '@/core/simulation'
 import { Door } from '@/entities/Door'
 import { registerInteractable, type Interactable } from '@/systems/interaction'
 import { flicker } from '@/systems/torch'
+import { ResetPlaque } from '@/ui/ResetPlaque'
 import { ShopPanel } from '@/ui/ShopPanel'
 import { StatusBoard } from '@/ui/StatusBoard'
 
@@ -103,6 +104,11 @@ export function Foyer() {
       {/* Beside the doorway, deliberately: it is the last thing you read on the way out and
           the first on the way back, which is exactly when the numbers on it change. */}
       <StatusBoard position={[1.6, 1.75, -halfD + 0.18]} />
+
+      {/* On the back wall, behind where the player spawns and at the opposite end of the
+          room from the door: the one control that destroys anything should not share a wall
+          with the one you use every run. */}
+      <ResetPlaque position={[-2.6, 1.5, halfD - 0.18]} rotation={Math.PI} />
 
       <Torches />
       <ShopCounter />
