@@ -7,24 +7,19 @@ sprint, before committing. The roadmap itself lives in [PLAN.md](PLAN.md).
 
 ## Current position
 
-> **Sprint 1.3 is signed off on the Quest 3. Sprint 1.4 — in-world options and a new-game
-> plaque — is built and awaiting its headset pass.**
+> **Epic 1 is complete and signed off on the Quest 3, through Sprint 1.4.**
 >
-> Three headset passes on the shop each found something — spherical picking on flat buttons,
-> a duplicate pointer aimed from the wrong pose, a beam a frame behind the hand — and all of
-> it is fixed and checked in the headset.
+> The whole meta loop works in a headset: start with 100 gold, buy and equip a weapon at the
+> board on the shop counter, set your comfort options on the wall without taking the headset
+> off, open the door, clear a wave, come back richer and spend it — or wipe the lot from the
+> plaque on the back wall and start again. All of it survives a reload.
 >
-> Sprint 1.4 closes the last thing in Epic 1 that only existed on desktop: the comfort
-> settings, which lived in a DOM dev panel that vanishes the moment the headset takes over
-> the page. They are now a board on the foyer wall, next to a plaque that starts a new game.
+> Getting there took four headset passes on the shop, each of which found something no
+> desktop test could: spherical picking on flat buttons, a duplicate pointer aimed from the
+> wrong pose, and a beam drawn a frame behind the hand.
 >
-> Epic 1 is otherwise complete end to end: start with 100 gold, buy and equip a weapon at a
-> board on the shop counter, open the door, clear a wave, come back richer and spend it. All
-> of it survives a reload.
->
-> Next, once 1.4 passes in the headset, is **Epic 2 — Wave Combat Core**, starting with
-> **Sprint 2.1 — Procedural dungeon generation**. That is where the wave stops being a walk into an empty
-> passage and the CC0 tile kit finally lands.
+> Next is **Epic 2 — Wave Combat Core**, starting with **Sprint 2.1 — Procedural dungeon
+> generation**. That is where the wave stops being a walk into an empty passage.
 
 ---
 
@@ -38,7 +33,7 @@ sprint, before committing. The roadmap itself lives in [PLAN.md](PLAN.md).
 | **1 — Foyer & Meta Loop** | 1.1 Foyer scene & interaction | ✅ Done |
 | | 1.2 Game state & persistence | ✅ Done |
 | | 1.3 Shop & weapon dialog | ✅ Verified on Quest 3 |
-| | 1.4 In-world options & new game | 🟨 Built — awaiting headset pass |
+| | 1.4 In-world options & new game | ✅ Verified on Quest 3 |
 | **2 — Wave Combat Core** | 2.1 Procedural dungeon generation | ⬜ Next |
 | | 2.2 Weapon & attack framework | ⬜ |
 | | 2.3 Enemies, AI & wave loop | ⬜ |
@@ -339,7 +334,7 @@ Decisions made during the sprint:
   clear condition belong to the Wave Director in 2.3; buying a weapon goes through the dev
   console until the shop lands in 1.3.
 
-### 🟨 Sprint 1.3 — Shop & weapon dialog
+### ✅ Sprint 1.3 — Shop & weapon dialog
 
 **Headset pass 1 (2026-08-03) — two defects, both fixed.** Reported: "you have to touch the
 board to trigger the buttons, you can't just stand back a little and point"; and "I touch a
@@ -482,7 +477,7 @@ Decisions made during the sprint:
   exists because headless Chromium has no pointer lock, and without it the shop — which
   necessarily faces the room from behind the counter — could not be tested outside a headset.
 
-### 🟨 Sprint 1.4 — In-world options & new game
+### ✅ Sprint 1.4 — In-world options & new game
 
 Not in the original plan. It was added the moment the question "how do I get to game
 options?" had no good answer: they were in the **F2 dev panel** — DOM, desktop-only, stripped
@@ -499,7 +494,7 @@ change reached `localStorage`, restores the defaults — then walks to the plaqu
 it twice, asserting the save is untouched after the first press and reset after the second,
 with the settings not wiped along with it.
 
-**Awaiting a Quest 3 pass.** What to check, in the headset:
+**Verified on the Quest 3 (2026-08-03).** What was checked:
 
 1. **The settings board** is on the wall left of the door, readable from where you spawn.
    Point at **Teleport** and pull the trigger. The choice should go green, and the change
