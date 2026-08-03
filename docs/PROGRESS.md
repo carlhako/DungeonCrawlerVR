@@ -7,19 +7,18 @@ sprint, before committing. The roadmap itself lives in [PLAN.md](PLAN.md).
 
 ## Current position
 
-> **Epic 1 is complete and signed off on the Quest 3, through Sprint 1.4.**
+> **Epic 1 is signed off on the Quest 3. Sprint 2.1 — procedural dungeon generation — is
+> built and awaiting its headset pass.**
 >
-> The whole meta loop works in a headset: start with 100 gold, buy and equip a weapon at the
-> board on the shop counter, set your comfort options on the wall without taking the headset
-> off, open the door, clear a wave, come back richer and spend it — or wipe the lot from the
-> plaque on the back wall and start again. All of it survives a reload.
+> Opening the foyer door now leads down the passage into a generated dungeon: rooms and
+> corridors, torch-lit, dark between the torches, different every wave and identical for the
+> same wave. There is still nothing in it to fight — that is 2.3 — so walking back into the
+> foyer still counts as clearing the wave.
 >
-> Getting there took four headset passes on the shop, each of which found something no
-> desktop test could: spherical picking on flat buttons, a duplicate pointer aimed from the
-> wrong pose, and a beam drawn a frame behind the hand.
->
-> Next is **Epic 2 — Wave Combat Core**, starting with **Sprint 2.1 — Procedural dungeon
-> generation**. That is where the wave stops being a walk into an empty passage.
+> The meta loop it hangs off is complete and verified: 100 gold, buy and equip a weapon at
+> the shop board, set your comfort options on the wall without taking the headset off, open
+> the door, clear a wave, come back richer and spend it — or wipe the lot from the plaque on
+> the back wall. All of it survives a reload.
 
 ---
 
@@ -34,7 +33,7 @@ sprint, before committing. The roadmap itself lives in [PLAN.md](PLAN.md).
 | | 1.2 Game state & persistence | ✅ Done |
 | | 1.3 Shop & weapon dialog | ✅ Verified on Quest 3 |
 | | 1.4 In-world options & new game | ✅ Verified on Quest 3 |
-| **2 — Wave Combat Core** | 2.1 Procedural dungeon generation | ⬜ Next |
+| **2 — Wave Combat Core** | 2.1 Procedural dungeon generation | 🟨 Built — awaiting headset pass |
 | | 2.2 Weapon & attack framework | ⬜ |
 | | 2.3 Enemies, AI & wave loop | ⬜ |
 | | 2.4 Hit feedback & VFX | ⬜ |
@@ -545,6 +544,77 @@ Decisions made during the sprint:
   from its *drawn* shape is precisely what made the shop unusable on the first headset pass.
 - Known scaffolding: the F2 panel stays for now. It tunes things the player has no business
   setting (physics, lighting, collider display), and it is still the faster tool at a desk.
+
+### 🟨 Sprint 2.1 — Procedural dungeon generation
+
+**Verified on desktop:** typecheck clean · 344/344 unit tests · production build succeeds ·
+smoke test opens the door, walks 16m down the passage into the generated level, and checks
+the player is standing on a cell the generator calls floor — then walks back out, which puts
+the level away.
+
+The sprint's own acceptance test is a unit test: **twenty seeds, every one connected and
+traversable, and the same seed always the same map.**
+
+Delivered:
+
+- `src/systems/dungeon/rng.ts` — seeded RNG (mulberry32) and a string hash, so a level that
+  goes wrong is reproducible from one number. Nothing procedural may call `Math.random`.
+- `src/systems/dungeon/generate.ts` — rooms by rejection sampling, joined with a minimum
+  spanning tree plus a few extra links for loops; L-shaped corridors; wall marking; torch
+  placement; spawn selection; and `validate`, which flood-fills the finished grid.
+- `src/systems/dungeon/nav.ts` — the navigation bake and 8-way A*, ready for the enemies in
+  2.3. Diagonals need both orthogonals open, so nothing squeezes through a wall corner.
+- `src/systems/dungeon/store.ts` — the live dungeon and its placement in the world.
+- `src/scenes/Dungeon.tsx` — the level as geometry: three instanced meshes, merged wall
+  colliders, and a pool of four torch lights moved onto whichever torches are nearest.
+- `src/ui/DungeonMapView.tsx` — the `F3` top-down debug map: rooms, torches, spawns, and
+  where you are. The only non-diegetic UI in the game, and dev-only.
+- `src/core/debug.ts` — `__DCVR__.render` (draw calls, triangles, live lights) and
+  `__DCVR__.dungeon`, both of which the smoke test now asserts against.
+
+Decisions made during the sprint:
+
+- **Connectivity is built in *and* checked.** The spanning tree makes every room reachable by
+  construction; `validate` then flood-fills anyway and `generate` retries a seed that fails.
+  A wave that cannot be finished because two rooms never joined up is not a difficulty spike,
+  and in the dark it is indistinguishable from being lost.
+- **`generate` throws rather than returning something broken.** A caller that has to handle
+  "the dungeon didn't work" will handle it by crashing in front of somebody in a headset.
+- **The player walks in; they are never teleported in.** The level is anchored so its mouth
+  meets the end of the foyer's passage exactly. A cut to black in VR is a cut to somebody
+  wondering where they went.
+- **The level has exactly one hole in it.** Every edge cell is solid except the mouth, and
+  there is a test that says so. The first build sealed *every* edge, including the one the
+  passage attached to — so the player walked into the dark and stopped against an invisible
+  wall.
+- **One seed per wave, forever.** Wave 3 is always the same dungeon: the player gets to learn
+  a level rather than being handed noise, and "wave 3 is broken" becomes a complete bug
+  report.
+- **Four lights, seventy torches.** Every torch is emissive geometry — free, and visible far
+  enough away to read a corridor before you are in it — and a pool of four point lights moves
+  onto the nearest ones. Moving lights rather than mounting one per torch matters: creating
+  and destroying lights recompiles every material they touch, which on a Quest is a hitch
+  every few steps as you walk.
+- **Torch intensity is 24, not 7.** Quadratic falloff makes that number much bigger than it
+  looks. At 7 the corridors were not atmospheric, they were unlit — found by walking the
+  level headlessly and looking at the screenshots.
+- **Wall colliders are merged into strips**, turning ~800 cuboids into a couple of hundred
+  for geometry that never moves.
+- The passage cap got **its own rigid body**. A Rapier body with `colliders="cuboid"` builds
+  its colliders from the children it had when it mounted, so removing the cap's mesh left the
+  collider standing — an invisible wall exactly where the dungeon was supposed to start.
+
+Known scaffolding, and the one deliberate gap:
+
+- **No CC0 art kit yet.** The plan had the Quaternius dungeon tiles landing here; the level is
+  built from primitives at real scale instead, the same way the foyer is. Importing an asset
+  pack means downloading it, which is a decision to make deliberately rather than in the
+  middle of a sprint — and the generator emits a tile grid, so swapping primitives for a kit
+  is a change to `Dungeon.tsx` alone.
+- Lighting is the honest minimum, not a lighting pass. **Sprint 3.1** owns fog, the ambient
+  floor, shadow strategy and the real light budget manager.
+- The wave still clears by walking back into the foyer. **Sprint 2.3**'s Wave Director takes
+  that over, along with the spawn points and the nav grid this sprint bakes for it.
 
 ---
 

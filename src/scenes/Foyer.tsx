@@ -6,6 +6,7 @@ import { useFixedUpdate } from '@/core/simulation'
 import { Door } from '@/entities/Door'
 import { registerInteractable, type Interactable } from '@/systems/interaction'
 import { flicker } from '@/systems/torch'
+import { useDungeon } from '@/systems/dungeon/store'
 import { ResetPlaque } from '@/ui/ResetPlaque'
 import { SettingsBoard } from '@/ui/SettingsBoard'
 import { ShopPanel } from '@/ui/ShopPanel'
@@ -123,14 +124,16 @@ export function Foyer() {
 }
 
 /**
- * A short dead-end passage on the far side of the door.
+ * The short passage on the far side of the door.
  *
- * Two jobs. It gives the door somewhere to swing into, and it means opening the door reveals
- * a dark passage rather than the outside of the level — without it the player walks through
- * their first door and falls out of the world, which is a poor introduction to a dungeon.
+ * It gives the door somewhere to swing into, and it means opening the door reveals a dark
+ * passage rather than the outside of the level — without it the player walks through their
+ * first door and falls out of the world, which is a poor introduction to a dungeon.
  *
- * The generated dungeon replaces it in Sprint 2.1. Until then it is the only part of the
- * game that is meant to feel unwelcoming, so it is unlit on purpose.
+ * Its far end is capped only while there is no dungeon behind it. Once a wave has been
+ * generated the cap goes and the passage runs straight into the level, so the player walks
+ * out of a door and into a dungeon rather than being cut to black and put there. In VR a cut
+ * to black is a cut to somebody wondering where they went.
  */
 function Vestibule() {
   const depth = 3.5
@@ -139,29 +142,50 @@ function Vestibule() {
   const zCentre = -ROOM_DEPTH / 2 - depth / 2
 
   return (
+    <>
+      <PassageCap z={zCentre - depth / 2} width={width} height={height} />
+      <RigidBody type="fixed" colliders="cuboid">
+        <mesh position={[DOORWAY_X, -0.15, zCentre]} receiveShadow>
+          <boxGeometry args={[width, 0.3, depth]} />
+          <meshStandardMaterial color={STONE_DARK} roughness={1} />
+        </mesh>
+        <mesh position={[DOORWAY_X, height + 0.15, zCentre]}>
+          <boxGeometry args={[width, 0.3, depth]} />
+          <meshStandardMaterial color="#191713" roughness={1} />
+        </mesh>
+        {[-1, 1].map((side) => (
+          <mesh
+            key={side}
+            position={[DOORWAY_X + (side * width) / 2, height / 2, zCentre]}
+            receiveShadow
+          >
+            <boxGeometry args={[0.3, height, depth]} />
+            <meshStandardMaterial color="#221f1b" roughness={1} />
+          </mesh>
+        ))}
+      </RigidBody>
+    </>
+  )
+}
+
+/**
+ * The cap on the far end of the passage, while there is no dungeon behind it.
+ *
+ * Its own rigid body rather than one more mesh inside the vestibule's, because a body with
+ * `colliders="cuboid"` builds its colliders from the children it had when it mounted.
+ * Removing the mesh left the collider standing — an invisible wall in the dark, exactly
+ * where the dungeon was supposed to start, and the player walked into nothing and stopped.
+ */
+function PassageCap({ z, width, height }: { z: number; width: number; height: number }) {
+  const sealed = useDungeon((state) => state.map) == null
+  if (!sealed) return null
+
+  return (
     <RigidBody type="fixed" colliders="cuboid">
-      <mesh position={[DOORWAY_X, -0.15, zCentre]} receiveShadow>
-        <boxGeometry args={[width, 0.3, depth]} />
-        <meshStandardMaterial color={STONE_DARK} roughness={1} />
-      </mesh>
-      <mesh position={[DOORWAY_X, height + 0.15, zCentre]}>
-        <boxGeometry args={[width, 0.3, depth]} />
-        <meshStandardMaterial color="#191713" roughness={1} />
-      </mesh>
-      <mesh position={[DOORWAY_X, height / 2, zCentre - depth / 2]} receiveShadow>
+      <mesh position={[DOORWAY_X, height / 2, z]} receiveShadow>
         <boxGeometry args={[width, height, 0.3]} />
         <meshStandardMaterial color="#221f1b" roughness={1} />
       </mesh>
-      {[-1, 1].map((side) => (
-        <mesh
-          key={side}
-          position={[DOORWAY_X + (side * width) / 2, height / 2, zCentre]}
-          receiveShadow
-        >
-          <boxGeometry args={[0.3, height, depth]} />
-          <meshStandardMaterial color="#221f1b" roughness={1} />
-        </mesh>
-      ))}
     </RigidBody>
   )
 }
@@ -186,7 +210,10 @@ function Wall({
 /** Wall-mounted torches. Warm, moving light — the whole mood of the room. */
 function Torches() {
   const half = ROOM_WIDTH / 2 - 0.25
-  const placements: Array<{ position: [number, number, number]; seed: number }> = [
+  const placements: Array<{
+    position: [number, number, number]
+    seed: number
+  }> = [
     { position: [-half, 2.2, -3], seed: 0 },
     { position: [half, 2.2, -3], seed: 1 },
     { position: [-half, 2.2, 2], seed: 2 },
@@ -354,3 +381,11 @@ function ShopCounter() {
 }
 
 export const FOYER_BOUNDS = { width: ROOM_WIDTH, depth: ROOM_DEPTH }
+
+/**
+ * Where the passage ends and the dungeon begins, in world metres.
+ *
+ * The generated level is anchored here, so its entry cell meets this opening exactly. Read
+ * by the run driver when it builds a wave.
+ */
+export const DUNGEON_MOUTH = { x: DOORWAY_X, z: -ROOM_DEPTH / 2 - 3.5 }

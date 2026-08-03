@@ -105,3 +105,28 @@ canvas {
 .hint--locked {
   color: rgba(217, 207, 187, 0.25);
 }
+
+/* The F3 dungeon map. Dev scaffolding, and the only non-diegetic UI in the game — it exists
+   for whoever is working on the generator, and never appears in a headset. */
+.dungeon-map {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  padding: 8px;
+  background: rgba(11, 11, 16, 0.88);
+  border: 1px solid rgba(217, 207, 187, 0.18);
+  border-radius: 6px;
+  pointer-events: none;
+}
+
+.dungeon-map canvas {
+  display: block;
+  image-rendering: pixelated;
+}
+
+.dungeon-map p {
+  margin: 6px 0 0;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: rgba(217, 207, 187, 0.6);
+}

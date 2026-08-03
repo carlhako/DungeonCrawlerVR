@@ -5,8 +5,10 @@ import { XR } from '@react-three/xr'
 import { Physics } from '@react-three/rapier'
 import { FIXED_STEP } from '@/core/loop'
 import { SimulationDriver } from '@/core/simulation'
+import { DebugView } from '@/core/DebugView'
 import { PhysicsDriver } from '@/core/physics'
 import { xrStore } from '@/core/xr'
+import { Dungeon } from '@/scenes/Dungeon'
 import { Foyer } from '@/scenes/Foyer'
 import { GreyboxRoom } from '@/scenes/GreyboxRoom'
 import { XRDiagnostics } from '@/scenes/XRDiagnostics'
@@ -27,6 +29,7 @@ import {
   useLightingControls,
   usePhysicsDebug,
 } from '@/ui/DevOverlay'
+import { DungeonMapView } from '@/ui/DungeonMapView'
 import { VRButton } from '@/ui/VRButton'
 import { DesktopHint } from '@/ui/DesktopHint'
 
@@ -85,6 +88,9 @@ function World() {
       <PhysicsDriver />
       <SceneLighting />
       {scene === 'foyer' ? <Foyer /> : <GreyboxRoom />}
+      {/* Mounted only while a wave exists, and continuous with the foyer's passage rather
+          than a scene the player is teleported into. */}
+      {scene === 'foyer' && <Dungeon />}
       <PlayerRig />
       <TeleportAim />
       <InteractionDriver />
@@ -99,7 +105,7 @@ function World() {
 }
 
 export function App() {
-  const { showPerf, showPanel } = useDevToggles()
+  const { showPerf, showPanel, showMap } = useDevToggles()
 
   return (
     <>
@@ -116,6 +122,7 @@ export function App() {
       >
         <XR store={xrStore}>
           <SimulationDriver />
+          <DebugView />
           <XRInputSampler />
           <DesktopInputSampler />
           <XRRenderSettings />
@@ -137,6 +144,7 @@ export function App() {
 
       <VRButton />
       <DevPanel visible={showPanel} />
+      <DungeonMapView visible={showMap} />
       {import.meta.env.DEV && (
         <>
           <XRSettingsControls />

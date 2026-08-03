@@ -71,6 +71,14 @@ export interface DungeonMap {
   rooms: Room[]
   /** Where the player arrives, in the middle of the entry room's near edge. */
   entry: Cell
+  /**
+   * The one cell on the boundary that is open: where the foyer's passage attaches.
+   *
+   * Every other edge cell is solid. This is the single deliberate hole in the level, and the
+   * foyer's vestibule butts directly against it — so walking out of the door leads into the
+   * dungeon rather than off the end of the world.
+   */
+  mouth: Cell
   /** The room the player arrives in. Nothing hostile starts here. */
   entryRoom: Room
   /** Candidate enemy spawn points, furthest-first. */
@@ -152,6 +160,14 @@ function build(seed: number, options: DungeonOptions): DungeonMap {
   )
   const entry = { x: Math.floor(entryRoom.x + entryRoom.w / 2), y: entryRoom.y + entryRoom.h - 1 }
 
+  // The approach tunnel: straight south from the entry to the edge of the grid, so the
+  // foyer's passage has something to meet. Carved after the walls are marked, then the
+  // walls are marked again — the stub needs its own sides, and the cells it passes through
+  // were rock a moment ago.
+  const mouth = { x: entry.x, y: height - 1 }
+  for (let y = entry.y; y <= mouth.y; y++) tiles[y * width + entry.x] = Tile.Floor
+  markWalls(tiles, width, height)
+
   const distances = floorDistances(tiles, width, height, entry)
   return {
     seed,
@@ -160,6 +176,7 @@ function build(seed: number, options: DungeonOptions): DungeonMap {
     tiles,
     rooms,
     entry,
+    mouth,
     entryRoom,
     spawns: pickSpawns(rooms, entryRoom, distances, width, options),
     torches: placeTorches(tiles, width, height, options.torchSpacing),
@@ -466,6 +483,18 @@ export function validate(map: DungeonMap): Validation {
       reasons.push(`the room at ${room.x},${room.y} cannot be reached`)
       break
     }
+  }
+  const holes: string[] = []
+  for (let x = 0; x < width; x++) {
+    if (tiles[x] === Tile.Floor) holes.push(`${x},0`)
+    if (tiles[(height - 1) * width + x] === Tile.Floor) holes.push(`${x},${height - 1}`)
+  }
+  for (let y = 0; y < height; y++) {
+    if (tiles[y * width] === Tile.Floor) holes.push(`0,${y}`)
+    if (tiles[y * width + width - 1] === Tile.Floor) holes.push(`${width - 1},${y}`)
+  }
+  if (holes.length !== 1 || holes[0] !== `${map.mouth.x},${map.mouth.y}`) {
+    reasons.push(`the level is open at its edge: ${holes.join(' ')}`)
   }
   if (map.spawns.length === 0) reasons.push('nowhere to spawn an enemy')
   if (map.torches.length === 0) reasons.push('no torches — the level would be pitch black')

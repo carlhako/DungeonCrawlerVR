@@ -9,7 +9,6 @@ import {
   isWalkable,
   validate,
   worldToCell,
-  type DungeonMap,
 } from './generate'
 
 /**
@@ -23,12 +22,6 @@ import {
  */
 
 const SEEDS = Array.from({ length: 20 }, (_, i) => i + 1)
-
-function floorCells(map: DungeonMap): number {
-  let count = 0
-  for (const tile of map.tiles) if (tile === Tile.Floor) count++
-  return count
-}
 
 describe('generate', () => {
   it.each(SEEDS)('seed %i is fully connected and traversable', (seed) => {
@@ -70,18 +63,31 @@ describe('generate', () => {
     }
   })
 
-  it('keeps the level sealed at its edges', () => {
-    // A floor cell on the boundary is a hole in the world: the player walks out of the
-    // level into nothing, which renders exactly as convincingly as a wall does.
+  it('seals every edge but the mouth', () => {
+    // A floor cell on the boundary is a hole in the world: the player walks out of the level
+    // into nothing, which renders exactly as convincingly as a wall does. Exactly one hole
+    // is allowed, and the foyer's passage is bolted to it.
     for (const seed of SEEDS) {
       const map = generate(seed)
+      const holes: string[] = []
       for (let x = 0; x < map.width; x++) {
-        expect(isWalkable(map, x, 0)).toBe(false)
-        expect(isWalkable(map, x, map.height - 1)).toBe(false)
+        if (isWalkable(map, x, 0)) holes.push(`${x},0`)
+        if (isWalkable(map, x, map.height - 1)) holes.push(`${x},${map.height - 1}`)
       }
       for (let y = 0; y < map.height; y++) {
-        expect(isWalkable(map, 0, y)).toBe(false)
-        expect(isWalkable(map, map.width - 1, y)).toBe(false)
+        if (isWalkable(map, 0, y)) holes.push(`0,${y}`)
+        if (isWalkable(map, map.width - 1, y)) holes.push(`${map.width - 1},${y}`)
+      }
+      expect(holes, `seed ${seed}`).toEqual([`${map.mouth.x},${map.mouth.y}`])
+    }
+  })
+
+  it('walks from the mouth to the entry without leaving the floor', () => {
+    for (const seed of SEEDS) {
+      const map = generate(seed)
+      expect(isWalkable(map, map.mouth.x, map.mouth.y)).toBe(true)
+      for (let y = map.entry.y; y <= map.mouth.y; y++) {
+        expect(isWalkable(map, map.entry.x, y), `seed ${seed}: gap at ${map.entry.x},${y}`).toBe(true)
       }
     }
   })

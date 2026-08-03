@@ -20,6 +20,7 @@ import {
 export function useDevToggles() {
   const [showPerf, setShowPerf] = useState(false)
   const [showPanel, setShowPanel] = useState(false)
+  const [showMap, setShowMap] = useState(false)
 
   useEffect(() => {
     if (!import.meta.env.DEV) return
@@ -32,12 +33,16 @@ export function useDevToggles() {
         e.preventDefault()
         setShowPanel((v) => !v)
       }
+      if (e.code === 'F3') {
+        e.preventDefault()
+        setShowMap((v) => !v)
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  return { showPerf, showPanel }
+  return { showPerf, showPanel, showMap }
 }
 
 /** Lives inside <Canvas>. */

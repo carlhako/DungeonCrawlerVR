@@ -1,3 +1,4 @@
+import type { Scene, WebGLRenderer } from 'three'
 import { gameLoop } from './loop'
 import { DESKTOP_EYE_HEIGHT, playerState, type PlayerState } from '@/systems/player'
 import { clampPitch, desktopInput } from '@/systems/desktopInput'
@@ -5,6 +6,8 @@ import { interactables, interactionState } from '@/systems/interaction'
 import { useRun, type RunEvent, type RunPhase } from '@/systems/run'
 import { useGame, type TransactionResult } from '@/systems/game'
 import { useShop } from '@/systems/shop'
+import { isWalkable } from '@/systems/dungeon/generate'
+import { useDungeon, worldToPlacedCell } from '@/systems/dungeon/store'
 import { sanitiseSettings, useSettings, type Settings } from '@/systems/settings'
 import type { SaveData } from '@/systems/save'
 import type { WeaponId } from '@/data/weapons'
@@ -56,6 +59,33 @@ export interface DebugHandle {
   /** What the shop panel is showing, and what it last said. */
   readonly shop: { selected: string; feedback: string | null; ok: boolean | null }
   /**
+   * What the renderer is actually being asked to do this frame.
+   *
+   * Draw calls and live lights are the two numbers that decide whether a Quest 3 holds
+   * 72fps, and both are easy to lose by accident — an instanced mesh that quietly became a
+   * thousand objects, a level that mounted a light per torch. Null before the first frame.
+   */
+  readonly render: {
+    drawCalls: number
+    triangles: number
+    lights: number
+    litIntensity: number
+  } | null
+  /**
+   * The dungeon the player is currently in, if any.
+   *
+   * `playerCell` is the question the smoke test actually needs answered: not "did a level
+   * generate" but "is the player standing on a cell the generator calls floor?" A body a
+   * metre inside a wall renders perfectly.
+   */
+  readonly dungeon: {
+    seed: number
+    rooms: number
+    torches: number
+    spawns: number
+    playerCell: { x: number; y: number; walkable: boolean }
+  } | null
+  /**
    * The live settings.
    *
    * Separate from `save` in exactly the way the two stores are: wiping progression must
@@ -88,6 +118,20 @@ export interface DebugHandle {
    * the far side of the counter — would be untestable outside a headset.
    */
   lookAt(x: number, y: number, z: number): void
+}
+
+/**
+ * The renderer and scene, handed over from inside the Canvas.
+ *
+ * `installDebugHandle` runs before React mounts, and these only exist inside an R3F tree —
+ * so `DebugView` (rendered in App) puts them here rather than the handle reaching in.
+ */
+const view: { scene: Scene | null; gl: WebGLRenderer | null } = { scene: null, gl: null }
+
+export function setDebugView(scene: Scene | null, gl: WebGLRenderer | null): void {
+  if (!import.meta.env.DEV) return
+  view.scene = scene
+  view.gl = gl
 }
 
 export function installDebugHandle(): void {
@@ -126,6 +170,39 @@ export function installDebugHandle(): void {
     get shop() {
       const { selected, feedback } = useShop.getState()
       return { selected, feedback: feedback?.text ?? null, ok: feedback?.ok ?? null }
+    },
+    get render() {
+      if (!view.scene || !view.gl) return null
+      let lights = 0
+      let litIntensity = 0
+      view.scene.traverse((object) => {
+        const light = object as { isLight?: boolean; intensity?: number }
+        if (!light.isLight) return
+        lights++
+        litIntensity += light.intensity ?? 0
+      })
+      return {
+        drawCalls: view.gl.info.render.calls,
+        triangles: view.gl.info.render.triangles,
+        lights,
+        litIntensity: +litIntensity.toFixed(2),
+      }
+    },
+    get dungeon() {
+      const { map, nav, offset } = useDungeon.getState()
+      if (!map || !nav || !offset) return null
+      const cell = worldToPlacedCell(
+        { map, nav, offset },
+        playerState.position.x,
+        playerState.position.z,
+      )
+      return {
+        seed: map.seed,
+        rooms: map.rooms.length,
+        torches: map.torches.length,
+        spawns: map.spawns.length,
+        playerCell: { ...cell, walkable: isWalkable(map, cell.x, cell.y) },
+      }
     },
     get settings() {
       // Through `sanitiseSettings` because the store also holds its own actions, and this

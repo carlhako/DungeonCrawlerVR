@@ -271,17 +271,39 @@ foyer.throughDoor = await walkUntil(['KeyW'], (p) => p.z < -6.8, 8)
 await page.waitForFunction(() => window.__DCVR__?.run.phase === 'wave', { timeout: 8000 })
 foyer.runInDungeon = await readRun()
 
-// Back the way we came. Reaching the foyer clears the wave.
+/**
+ * On into the generated dungeon, which is Sprint 2.1's acceptance test on the walking side.
+ *
+ * The generator's own guarantees — connected, traversable, the same seed twice — are unit
+ * tested. What only a running game can answer is whether the level the *player* meets is the
+ * one the generator described: that the passage really opens onto it rather than into an
+ * invisible wall, that the player ends up standing on a cell the generator calls floor, and
+ * that a level of a few thousand cells still draws in a handful of calls. That last number
+ * is the one that decides whether a Quest holds 72fps.
+ */
+const dungeon = {}
+dungeon.map = await page.evaluate(() => {
+  const d = window.__DCVR__.dungeon
+  return d ? { seed: d.seed, rooms: d.rooms, torches: d.torches, spawns: d.spawns } : null
+})
+dungeon.inside = await walkUntil(['KeyW'], (p) => p.z < -16, 20)
+dungeon.render = await page.evaluate(() => window.__DCVR__.render)
+dungeon.cell = await page.evaluate(() => window.__DCVR__.dungeon?.playerCell ?? null)
+
+// Back the way we came. Reaching the foyer clears the wave, and the level is put away.
 foyer.backInside = await walkUntil(
   ['KeyS'],
   async () => (await readRun())?.phase !== 'wave',
-  10,
+  25,
 )
 foyer.runOnClear = await readRun()
 
 // The end-of-wave state hands the player back to the shop on its own after a beat.
 await page.waitForFunction(() => window.__DCVR__?.run.phase === 'foyer', { timeout: 10000 })
 foyer.saveAfterWave = await readSave()
+// Sampled here rather than on the clear: the level is put away when the player is handed
+// back to the shop, not the moment the last enemy dies.
+dungeon.cleared = await page.evaluate(() => window.__DCVR__.dungeon)
 
 /**
  * The shop, which is Sprint 1.3's acceptance test.
@@ -428,7 +450,7 @@ await page.waitForFunction(() => window.__DCVR__?.player != null, { timeout: 150
 await page.waitForTimeout(500)
 
 /**
- * The settings board, first: it shares the foyer visit with the reset plaque, and the pair
+ * The settings board: it shares the foyer visit with the reset plaque, and the pair
  * of them are the point of Sprint 1.4 — every control in a headset has to be *in the room*.
  */
 const settings = {}
@@ -471,6 +493,7 @@ await browser.close()
 info.foyer = foyer
 info.shop = shop
 info.movement = movement
+info.dungeon = dungeon
 info.settings = settings
 info.reset = reset
 
@@ -683,6 +706,30 @@ else {
       failures.push(`player left the level at ${label}: ${JSON.stringify(sample)}`)
     }
   }
+}
+
+const dun = info.dungeon
+if (!dun.map) {
+  failures.push('no dungeon was generated when the door opened')
+} else {
+  if (dun.map.rooms < 5) failures.push(`only ${dun.map.rooms} rooms generated`)
+  if (dun.map.torches < 5) failures.push(`only ${dun.map.torches} torches placed`)
+  if (dun.inside.z > -16) {
+    failures.push(`could not walk into the dungeon: stopped at z=${dun.inside.z}`)
+  }
+  if (!dun.cell || !dun.cell.walkable) {
+    failures.push(`the player ended up somewhere unwalkable: ${JSON.stringify(dun.cell)}`)
+  }
+  // The whole level is three instanced meshes. If this creeps into the hundreds, something
+  // has started drawing a few thousand cells one at a time and the Quest will not hold 72.
+  if (!dun.render || dun.render.drawCalls > 40) {
+    failures.push(`too many draw calls in the dungeon: ${dun.render?.drawCalls}`)
+  }
+  // Seventy torches, four lights. The single most expensive thing to get wrong.
+  if (!dun.render || dun.render.lights > 12) {
+    failures.push(`too many live lights in the dungeon: ${dun.render?.lights}`)
+  }
+  if (dun.cleared) failures.push('the dungeon was still loaded after returning to the foyer')
 }
 
 const set = info.settings

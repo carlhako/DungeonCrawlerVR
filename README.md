@@ -81,6 +81,7 @@ once per session, so it lands on your next VR entry. The board says so.
 
 - `F1` — frame/perf HUD
 - `F2` — live tuning panel (Movement, XR render, Lighting, Physics)
+- `F3` — top-down map of the current dungeon: rooms, torches, spawn points and where you are
 
 `F2` is a *dev* panel: DOM-only, stripped from production builds, and invisible inside a VR
 session. It stays because it tunes things a player has no business setting — physics,
@@ -88,8 +89,11 @@ lighting, collider display — and it is quicker at a desk. The foyer board is t
 
 ### Scenes
 
-The game opens in the **foyer**. The Sprint 0.1–0.3 greybox is still there at
-`?scene=greybox` — it is the only room with a staircase, a ramp and a ledge to walk at, so
+The game opens in the **foyer**. Opening the door and walking down the passage leads into a
+**generated dungeon** — one seed per wave, so wave 3 is always the same level. `F3` draws it
+from above while you are in it.
+
+The Sprint 0.1–0.3 greybox is still there at `?scene=greybox` — it is the only room with a staircase, a ramp and a ledge to walk at, so
 it stays as the character controller's test rig and the smoke test still drives it.
 
 ## Testing on the Quest 3
@@ -166,7 +170,11 @@ Enter VR and confirm, in order:
     **Walk speed**; a stepper at the end of its range greys out rather than doing nothing.
     **Render scale** says on the board that it applies on the next VR entry — check that it
     does. **Restore defaults** puts everything back. Reload; your choices are still there.
-13. **Starting over** — turn around. The "new game" plaque is on the back wall behind the
+13. **The dungeon** — open the door and keep walking down the passage. It should lead into a
+    generated level rather than a dead end: rooms and corridors, lit by torches with real
+    darkness between them. Check you can walk a long way in and back out without meeting an
+    invisible wall, and that the frame HUD holds up in the biggest room you can find.
+14. **Starting over** — turn around. The "new game" plaque is on the back wall behind the
     spawn. One press arms it and it says so; a second wipes gold, weapons and upgrades back
     to a first launch. Leave it armed and walk away — it must stand down by itself. Then
     check the settings board: your comfort options must *not* have been wiped with it.
@@ -277,6 +285,10 @@ the next VR entry.
   The pointer beam hangs off that same space rather than being positioned from it: a tracked
   pose read from `matrixWorld` is a frame old, and a beam a frame behind the hand reads as a
   second beam trailing the first. Parent to a pose, don't chase it.
+- **The dungeon is one grid, read by everything** (`src/systems/dungeon/`). The renderer, the
+  wall colliders, the torch placement and the pathfinder all read the same tile array, so what
+  you can see, what you walk into and what an enemy routes around cannot disagree. Generation
+  is pure and seeded: a level that goes wrong is reproducible from one number.
 - **In-game UI is world-space, always** (`src/ui/panelButtons.ts`). The shop, the settings
   board and the reset plaque are all canvas textures with their buttons registered as the
   rectangles they are drawn as, through one shared path — because a button's pick shape

@@ -3,22 +3,28 @@ import { SystemOrder } from '@/core/loop'
 import { useFixedUpdate } from '@/core/simulation'
 import { playerState } from '@/systems/player'
 import { useRun, type RunPhase } from '@/systems/run'
-import { FOYER_BOUNDS } from '@/scenes/Foyer'
+import { useDungeon } from '@/systems/dungeon/store'
+import { DUNGEON_MOUTH, FOYER_BOUNDS } from '@/scenes/Foyer'
 
 /**
  * Drives the run machine's timed and positional transitions.
  *
- * Most of this is scaffolding with a known expiry date. There is no dungeon to load until
- * Sprint 2.1 and nothing to kill until 2.3, so "loading" is a pause and "the wave is
- * cleared" is the player walking back into the foyer. That is enough to make the whole loop
- * — door, wave, payout, back to the shop — real and testable *now*, on a headset, rather
- * than a state machine that only unit tests have ever seen run.
+ * As of Sprint 2.1 "loading" actually builds something: the dungeon for this wave is
+ * generated from a seed derived from the wave number, and anchored so that it meets the far
+ * end of the foyer's passage. Nothing to kill until 2.3, so "the wave is cleared" is still
+ * the player walking back into the foyer.
  *
- * The Wave Director in 2.3 takes over `loaded` and `cleared`, and this file loses everything
- * except the end-of-wave pause.
+ * The Wave Director in 2.3 takes over `cleared`, and this file loses everything except the
+ * loading beat and the end-of-wave pause.
  */
 
-/** Long enough to read as a transition rather than a stutter. Replaced by real generation. */
+/**
+ * A beat, not a progress bar.
+ *
+ * Generation takes a couple of milliseconds, so this is entirely for the player: a door that
+ * opens onto a level that appeared between two frames reads as a glitch. It also gives the
+ * geometry a frame or two to be uploaded before anyone is looking at it.
+ */
 const LOADING_SECONDS = 0.9
 
 /** How long the end-of-wave state holds before handing the player back to the shop. */
@@ -48,6 +54,11 @@ export function RunDriver() {
 
     switch (run.phase) {
       case 'loading':
+        // Built on the first step of the phase, before the beat, so the level is there and
+        // its meshes are uploaded by the time the passage opens onto it.
+        if (useDungeon.getState().map == null) {
+          useDungeon.getState().build(run.wave, DUNGEON_MOUTH)
+        }
         if (elapsed.current >= LOADING_SECONDS) run.send('loaded')
         break
 
@@ -67,6 +78,10 @@ export function RunDriver() {
         break
 
       case 'foyer':
+        // Back in the shop: the level the player just walked out of goes away, and the
+        // passage seals itself again. Holding it would keep a few thousand instances and a
+        // nav grid alive for a dungeon nobody can reach.
+        if (useDungeon.getState().map != null) useDungeon.getState().clear()
         break
     }
   }, SystemOrder.World)
