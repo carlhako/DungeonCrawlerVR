@@ -9,7 +9,8 @@ sprint, before committing. The roadmap itself lives in [PLAN.md](PLAN.md).
 
 > **Epics 0 and 1 are signed off on the Quest 3, and so are Sprints 2.1 and 2.2. Sprint 2.3 —
 > enemies, AI and the wave loop — is written and green on the desktop, and is waiting on a
-> Quest 3 pass. Sprint 2.4 — hit feedback & VFX — is next.**
+> Quest 3 pass. Sprint 2.4 — stealth & enemy awareness — is next, ahead of hit feedback &
+> VFX, which moves to 2.5.**
 >
 > **There is something in the dungeon now.** Open the door, walk down the passage into the
 > generated level, and a wave composed from the wave number comes looking for you: Goblin
@@ -50,7 +51,8 @@ sprint, before committing. The roadmap itself lives in [PLAN.md](PLAN.md).
 | **2 — Wave Combat Core** | 2.1 Procedural dungeon generation | ✅ Verified on Quest 3 |
 | | 2.2 Weapon & attack framework | ✅ Verified on Quest 3 |
 | | 2.3 Enemies, AI & wave loop | 🟡 Desktop green — Quest 3 pass outstanding |
-| | 2.4 Hit feedback & VFX | ⬜ |
+| | 2.4 Stealth & enemy awareness | ✅ Desktop green — Quest 3 pass outstanding |
+| | 2.5 Hit feedback & VFX | ⬜ |
 | **3 — Fear & Atmosphere** | 3.1 Darkness & lighting | ⬜ |
 | | 3.2 Spatial audio | ⬜ |
 | | 3.3 Horror direction | ⬜ |
@@ -967,6 +969,47 @@ Known scaffolding, and the gaps:
 - The light budget still does not know enemies exist. **Sprint 3.1** owns that.
 
 ---
+
+### ✅ Sprint 2.4 — Stealth & enemy awareness
+
+**Verified on desktop:** typecheck clean · 619/619 unit tests · production build succeeds.
+
+Delivered:
+
+- `src/systems/stealth.ts` — the detection rules as pure functions: aggro radius scaled by
+  player movement speed, weapon noise pulses that ignore line of sight, and a 30-second
+  safety valve that replaces the old 2-second `HUNT_DELAY`. 14 tests.
+- `src/systems/enemies/ai.ts` — the idle detection now uses three paths: `enemy.alerted`
+  (from damage or noise), LOS within `aggroRadius × detectionScale`, and the safety valve
+  at `MAX_IDLE_SECONDS`. `detectionScale` added to `AiContext`.
+- `src/systems/EnemyDriver.tsx` — computes `detectionScale` from `playerState.speed` each
+  step; processes `noiseEvent` to alert idle enemies within range with no LOS required.
+- `src/systems/CombatDriver.tsx` — emits a noise pulse on every wand fire and every melee
+  swing fast enough to register, hit or miss, before the sweep check.
+
+Decisions made during the sprint:
+
+- **Three detection paths, not one.** The old `HUNT_DELAY` was a single flat timer. The new
+  system separates detection into three independent paths — being hurt/alerted, being seen at
+  speed-scaled range, and the safety valve — so each can be tuned and tested independently.
+- **The noise pulse sits before the hit sweep.** For melee, `emitNoise` fires before
+  `sweepDamageables`, so a swing that misses still breaks stealth. For wands, it fires before
+  `spawnProjectile`, so the muzzle report itself is what alerts enemies.
+- **The noise origin is the player, not the weapon tip.** A 20m radius covers most rooms
+  regardless of where exactly the muzzle was, and keeping it simple avoids questions about
+  which hand fired and whether the noise source is inside a wall.
+- **`detectionScale` is linear between quiet and loud.** No hard cliff at a threshold that a
+  player can't see — speed just above 1.0 m/s is only slightly more detectable than speed
+  just below.
+- **The safety valve is 30s, not 2s.** The old `HUNT_DELAY` made stealth impossible — every
+  enemy was on you two seconds after spawning regardless. Now the safety valve is the
+  *last resort*, not the primary mechanic. It exists to prevent wave stalls, not to be the
+  normal way fights begin.
+- **No changes to `chase`.** Once an enemy has you, it has you — exactly as the spec says.
+  Breaking line of sight during a chase does not reset to idle, and there is no route back.
+- **Large rooms need no new code.** `hasLineOfSight` already sees further in open rooms, so
+  crossing one unseen is naturally harder than a corridor — the detection scaling plays out
+  correctly with no special cases.
 
 ## How to pick this up in a new session
 

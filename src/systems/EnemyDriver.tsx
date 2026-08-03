@@ -21,6 +21,7 @@ import {
 import { director, enemyPool } from '@/systems/enemies/state'
 import { resolveMove, type Neighbour } from '@/systems/enemies/steering'
 import { useRun } from '@/systems/run'
+import { detectionScale, noiseEvent } from '@/systems/stealth'
 import { hurtPlayer, isAlive, playerVitals, resetVitals, stepVitals } from '@/systems/vitals'
 import { beginWave, endWave, markCleared, recordKill, returnToQueue, stepDirector } from '@/systems/waves'
 
@@ -117,6 +118,7 @@ export function EnemyDriver() {
         neighbours: [] as Neighbour[],
         selfIndex: -1,
         playerAlive: true,
+        detectionScale: 1,
       } as AiContext,
     }),
     [],
@@ -174,10 +176,25 @@ export function EnemyDriver() {
       // Chest height, which is where a claw is aimed and where the distance is measured from.
       scratch.ctx.player.y = playerState.position.y + PLAYER_CHEST
       scratch.ctx.player.z = playerState.position.z
+      scratch.ctx.detectionScale = detectionScale(playerState.speed)
 
       spawn(placement, dt)
       collectNeighbours(scratch.neighbours)
       scratch.ctx.neighbours = scratch.neighbours
+
+      // Noise pulse: a weapon fired this step alerts every idle enemy within range, no line
+      // of sight required. Shooting breaks stealth even from behind cover.
+      if (noiseEvent.remaining > 0) {
+        for (const enemy of enemyPool.items) {
+          if (!enemy.active || enemy.phase !== 'idle' || enemy.alerted) continue
+          const dx = noiseEvent.position.x - enemy.position.x
+          const dz = noiseEvent.position.z - enemy.position.z
+          if (Math.hypot(dx, dz) <= noiseEvent.radius) {
+            enemy.alerted = true
+          }
+        }
+        noiseEvent.remaining -= dt
+      }
 
       let index = 0
       for (const enemy of enemyPool.items) {

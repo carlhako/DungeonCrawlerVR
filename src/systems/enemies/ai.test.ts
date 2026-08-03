@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { CORPSE_SECONDS, ENEMIES, SPAWN_SECONDS, type EnemyId } from '@/data/enemies'
 import { applyStatus } from '@/systems/combat/damage'
+import { MAX_IDLE_SECONDS, QUIET_DETECTION } from '@/systems/stealth'
 import {
-  HUNT_DELAY,
   RANGE_HYSTERESIS,
   enterPhase,
   killEnemy,
@@ -28,6 +28,7 @@ function context(overrides: Partial<AiContext> = {}): AiContext {
     neighbours: [],
     selfIndex: -1,
     playerAlive: true,
+    detectionScale: 1,
     ...overrides,
   }
 }
@@ -73,29 +74,71 @@ describe('spawning', () => {
 })
 
 describe('aggro', () => {
-  it('does not react to a player it cannot see', () => {
+  it('does not react to a player it cannot see, before the safety valve', () => {
     // Aggro through a wall makes a dungeon feel like a room full of trip-wires rather than a
-    // place with things living in it. It will still come hunting a moment later — see below —
-    // but not as a reaction to a position it has no way of knowing.
+    // place with things living in it.
     const enemy = makeEnemy()
-    run(enemy, context({ visible: false }), SPAWN_SECONDS + HUNT_DELAY * 0.5)
+    run(enemy, context({ visible: false }), SPAWN_SECONDS + 5)
     expect(enemy.phase).toBe('idle')
   })
 
-  it('does not react to a player it can see but is nowhere near', () => {
+  it('does not react to a player it can see but is nowhere near, with full detection', () => {
     const enemy = makeEnemy()
     const far = context({ player: { x: 0, y: 1.05, z: -60 } })
-    run(enemy, far, SPAWN_SECONDS + HUNT_DELAY * 0.5)
+    run(enemy, far, SPAWN_SECONDS + 5)
     expect(enemy.phase).toBe('idle')
   })
 
-  it('comes hunting anyway, wherever the player is', () => {
-    // The wave has to come to the player. Left to line of sight alone, something spawned at
-    // the far end of a level idles there for the rest of the night and the only way to finish
-    // a wave is to go room to room looking for it — a different game, and a worse one.
+  it('does not react when the player is just outside the shrunk detection radius while moving quietly', () => {
+    // Quiet movement shrinks the aggro radius. A player just outside the shrunk radius
+    // should remain undetected — the whole point of the stealth mechanic.
+    const definition = ENEMIES['skeleton-warrior']
+    const enemy = makeEnemy('skeleton-warrior')
+    // Full aggro radius is 13, shrunk is 13 * QUIET_DETECTION = 5.2. Stand at 7m — visible
+    // but outside the shrunk radius.
+    const shrunkRadius = definition.aggroRadius * QUIET_DETECTION
+    const ctx = context({
+      player: { x: 0, y: 1.05, z: -(shrunkRadius + 1.5) },
+      visible: true,
+      detectionScale: QUIET_DETECTION,
+    })
+    run(enemy, ctx, SPAWN_SECONDS + 3)
+    expect(enemy.phase).toBe('idle')
+  })
+
+  it('notices a player within the shrunk radius even while creeping', () => {
+    const definition = ENEMIES['skeleton-warrior']
+    const enemy = makeEnemy('skeleton-warrior')
+    const shrunkRadius = definition.aggroRadius * QUIET_DETECTION
+    // Inside the shrunk radius, visible — should notice.
+    const ctx = context({
+      player: { x: 0, y: 1.05, z: -(shrunkRadius - 1) },
+      visible: true,
+      detectionScale: QUIET_DETECTION,
+    })
+    run(enemy, ctx, SPAWN_SECONDS + 1)
+    expect(enemy.phase).toBe('chase')
+  })
+
+  it('notices a player at full radius when moving at full speed', () => {
+    const definition = ENEMIES['skeleton-warrior']
+    const enemy = makeEnemy('skeleton-warrior')
+    // Just inside the full radius, visible, full detection.
+    const ctx = context({
+      player: { x: 0, y: 1.05, z: -(definition.aggroRadius - 1) },
+      visible: true,
+      detectionScale: 1,
+    })
+    run(enemy, ctx, SPAWN_SECONDS + 1)
+    expect(enemy.phase).toBe('chase')
+  })
+
+  it('comes hunting after the safety valve, regardless of detection', () => {
+    // The last-resort guarantee. A player camped somewhere no spawn point can see will not
+    // stall the wave forever.
     const enemy = makeEnemy()
     const far = context({ player: { x: 0, y: 1.05, z: -60 }, visible: false })
-    run(enemy, far, SPAWN_SECONDS + HUNT_DELAY + STEP * 2)
+    run(enemy, far, SPAWN_SECONDS + MAX_IDLE_SECONDS + STEP * 2)
     expect(enemy.phase).toBe('chase')
   })
 

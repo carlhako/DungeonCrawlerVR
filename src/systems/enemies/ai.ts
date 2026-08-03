@@ -42,6 +42,7 @@ import {
   type Neighbour,
   type Steer,
 } from '@/systems/enemies/steering'
+import { MAX_IDLE_SECONDS } from '@/systems/stealth'
 
 /** How far past `attackRange` an enemy will chase before it re-enters the wind-up. */
 export const RANGE_HYSTERESIS = 0.4
@@ -59,20 +60,16 @@ export const SEPARATION_WEIGHT = 0.85
 export const TURN_RATE = 4.2
 
 /**
- * How long a spawned enemy waits before it starts hunting the player unprompted.
+ * Seconds an idle enemy waits before it starts hunting the player regardless of detection.
  *
- * This exists because of what these enemies *are*. Nothing in this dungeon is ambient — every
- * one of them is placed by the Wave Director as part of a wave, at the far end of a level the
- * player has to clear to finish it. Left to line of sight alone they idle sixty metres away
- * for the rest of the night, and the wave can only be completed by the player going room to
- * room hunting them. That is a different game, and a worse one.
+ * This is the safety valve, not the primary mechanic. Line of sight and the scaled aggro
+ * radius are how most fights begin; this timer is the last-resort guarantee that a player
+ * camped somewhere no spawn point can see will not stall the wave forever.
  *
- * So aggro is *reaction*, and this is *intent*. Seeing the player inside the aggro radius —
- * or being shot — makes an enemy turn on you immediately, which is what stops the level
- * reading as a set of trip-wires. This is the fallback that guarantees the fight comes to you
- * anyway, a couple of seconds later, from wherever it started.
+ * Exported from `stealth.ts` and re-exported here so the AI code and its tests don't need
+ * to reach across systems for a constant they depend on.
  */
-export const HUNT_DELAY = 2
+export { MAX_IDLE_SECONDS } from '@/systems/stealth'
 
 /**
  * How far an enemy will drift off the direct line during its wind-up, in m/s.
@@ -100,6 +97,13 @@ export interface AiContext {
   selfIndex: number
   /** True while the player is alive and fightable. A dead player is not chased or hit. */
   playerAlive: boolean
+  /**
+   * Multiplier on aggro radius this step, 0..1.
+   *
+   * Computed from the player's movement speed by the stealth system. Quiet movement shrinks
+   * how far away an enemy notices you; normal or fast movement leaves it at full radius.
+   */
+  detectionScale: number
 }
 
 /** What the driver should do about this enemy's decision this step. */
@@ -198,12 +202,18 @@ export function stepEnemyAi(enemy: Enemy, ctx: AiContext, dt: number): AiIntent 
 
     case 'idle': {
       if (!ctx.playerAlive) return IDLE
-      // Line of sight *and* range — see `hasLineOfSight`. Being shot is aggro on its own,
-      // or a wand outranges every enemy in the game and sniping becomes the whole tactic.
+      // Three ways to be noticed:
+      // 1. Already alerted — being shot, or a noise pulse from a nearby weapon.
+      // 2. Line of sight within the effective aggro radius, scaled by how quietly the
+      //    player is moving. A creep shrinks the radius; a run leaves it at full.
+      // 3. The safety valve — after MAX_IDLE_SECONDS, hunt regardless. This is tens of
+      //    seconds, not two, and it exists only so a player who camps somewhere no spawn
+      //    point can see cannot stall the wave forever.
+      const effectiveRadius = definition.aggroRadius * ctx.detectionScale
       const noticed =
         enemy.alerted ||
-        (ctx.visible && distance <= definition.aggroRadius) ||
-        enemy.timer >= HUNT_DELAY
+        (ctx.visible && distance <= effectiveRadius) ||
+        enemy.timer >= MAX_IDLE_SECONDS
       if (!noticed) return IDLE
       enterPhase(enemy, 'chase')
       return { ...IDLE, repath: true }

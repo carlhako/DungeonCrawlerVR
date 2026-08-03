@@ -185,7 +185,29 @@ Every sprint ends with a **testable build**. Sprints from 0.2 onward are verifie
 - Implement **Goblin Skulker**, **Skeleton Warrior**, **Wraith**.
 - ✅ **Test:** the complete loop — foyer → door → dungeon → clear waves 1–3 → earn gold → return to foyer → spend it. Death returns you to the foyer with everything intact.
 
-**Sprint 2.4 — Hit feedback & VFX**
+**Sprint 2.4 — Stealth & enemy awareness**
+- Replace the flat `HUNT_DELAY` fallback (every idle enemy starts hunting ~2s after spawn
+  regardless of sight) with real detection: line-of-sight + `aggroRadius`, scaled by how much
+  noise the player is making. Slow movement shrinks the effective aggro radius; normal/fast
+  movement doesn't. Being seen is still being seen — an enemy with real LOS at close range
+  finds you no matter how quiet you're being.
+- A noise pulse on weapon use — firing the Emberwand, swinging the Frostbrand, hit or miss —
+  alerts idle enemies within a noise radius with no line-of-sight required, the same way
+  `enemy.alerted` already works for a landed hit. Shooting breaks stealth even from behind
+  cover.
+- A long safety-valve timer (tens of seconds, not 2) replacing `HUNT_DELAY`'s current job:
+  the last-resort guarantee that a wave can't stall forever against a player camped somewhere
+  an enemy's spawn point can never get line of sight to.
+- No change to `chase`: once an enemy has you, it has you for the fight — that half of the
+  brief ("once they see you, they advance") is already built. Large rooms need no new code
+  either; longer real sightlines from `hasLineOfSight` already make big open rooms harder to
+  cross unseen than a corridor.
+- ✅ **Test:** walk a wave slowly and quietly past enemies outside their shrunk aggro radius
+  without triggering it; fire a shot from behind a wall and watch enemies without line of
+  sight still turn hostile; confirm a deliberately-hidden player still gets found eventually
+  by the safety-valve timer rather than stalling the wave.
+
+**Sprint 2.5 — Hit feedback & VFX**
 - Impact sparks, ash/blood bursts, hit flash, brief hitstop, muzzle flash, projectile trails, dissolve-on-death shader.
 - Screenshake on desktop only (**never** in VR — it causes nausea); VR feedback is haptics + audio + visual flash instead.
 - Floating damage numbers billboarded in world space.

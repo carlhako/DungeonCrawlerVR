@@ -12,6 +12,7 @@ import { desktopInput } from '@/systems/desktopInput'
 import { useGame } from '@/systems/game'
 import { playerCollider, playerState } from '@/systems/player'
 import { handednessOf, useSettings } from '@/systems/settings'
+import { emitNoise, WEAPON_NOISE_RADIUS } from '@/systems/stealth'
 import { xrInput } from '@/systems/xrInput'
 import { resolveDamage, type DamageSpec } from '@/systems/combat/damage'
 import { toPlayerFrame, trackSwing } from '@/systems/combat/melee'
@@ -162,6 +163,11 @@ function stepHand(
     const attempt = swingWindow(state, swing.speed)
     if (!attempt.ok) return
 
+    // A swing fast enough to register is a noise event — stealth breaks when you swing a
+    // blade, hit or miss. The pulse originates from the player, so enemies in all directions
+    // hear it.
+    emitNoise(playerState.position, WEAPON_NOISE_RADIUS)
+
     // The blade's own sweep is the hit test. A radius on top of it because only the *tip* is
     // tracked and a sword is 85cm of edge: a cut that passes within a hand's breadth of
     // something plainly connected somewhere along the blade, and in VR the alternative reads
@@ -194,6 +200,9 @@ function stepHand(
     if (attempt.reason === 'mana') buzz(slot, Haptic.tick)
     return
   }
+
+  // Firing a wand is a noise pulse — shooting breaks stealth even from behind cover.
+  emitNoise(playerState.position, WEAPON_NOISE_RADIUS)
 
   spawnProjectile(projectilePool, {
     origin: pose.origin,
