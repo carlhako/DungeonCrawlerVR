@@ -1,17 +1,22 @@
 /**
  * Head-locked HUD overlays rendered as canvas-textured quads inside the R3F canvas.
  *
- * Sprint 2.5: the enemy counter and the explored-area map are screen-space HUD elements
- * that must work on desktop and in VR. A DOM overlay is invisible inside an immersive
- * session, so both are drawn as canvas textures on quads parented to the camera — on
- * desktop this reads as fixed on the screen; in VR it reads as a headset HUD.
- *
- * Pattern shared with `ComfortVignette`, which already proves the head-locked approach.
+ * Uses the identical head-locking pattern as ComfortVignette: `matrixWorld.decompose()`
+ * each frame so the quad follows the camera in both desktop and VR.
  */
 
 import { useEffect, useMemo, useRef } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
-import { CanvasTexture, DoubleSide, Mesh, MeshBasicMaterial, PlaneGeometry, Quaternion, Vector3 } from 'three'
+import {
+  CanvasTexture,
+  DoubleSide,
+  Matrix4,
+  Mesh,
+  MeshBasicMaterial,
+  PlaneGeometry,
+  Quaternion,
+  Vector3,
+} from 'three'
 
 export interface HudCanvasSize {
   width: number
@@ -28,7 +33,7 @@ export function HudOverlay({
 }: {
   sizeMetres: [number, number]
   canvasSize: HudCanvasSize
-  /** Offset in head-local space: right, up, forward. */
+  /** Offset in head-local space: right, up, forward (metres). */
   offset: [number, number, number]
   renderOrder: number
   draw: (ctx: CanvasRenderingContext2D, width: number, height: number) => void
@@ -41,14 +46,21 @@ export function HudOverlay({
     const canvas = document.createElement('canvas')
     canvas.width = canvasSize.width
     canvas.height = canvasSize.height
+
+    // Pre-fill with a visible colour so the first frame isn't a fully transparent
+    // quad. The real content is drawn by the `draw` callback every `useFrame`.
+    const initCtx = canvas.getContext('2d')
+    if (initCtx) {
+      initCtx.fillStyle = 'rgba(255,0,255,0.3)'
+      initCtx.fillRect(0, 0, canvas.width, canvas.height)
+    }
+
     const tex = new CanvasTexture(canvas)
     const mat = new MeshBasicMaterial({
       map: tex,
       transparent: true,
       depthTest: false,
       depthWrite: false,
-      // PlaneGeometry faces +Z but the camera looks along -Z — the quad would be
-      // backface-culled in both eyes without this.
       side: DoubleSide,
     })
     const geo = new PlaneGeometry(sizeMetres[0], sizeMetres[1])
@@ -63,16 +75,15 @@ export function HudOverlay({
     }
   }, [geometry, material, texture])
 
-  // Reusable scratch objects for the per-frame update.
-  const scratchRight = useMemo(() => ({ x: 0, y: 0, z: 0 }), [])
-  const scratchUp = useMemo(() => ({ x: 0, y: 0, z: 0 }), [])
-  const scratchForward = useMemo(() => ({ x: 0, y: 0, z: 0 }), [])
-  // PlaneGeometry faces +Z; the camera looks along -Z. Rotate 180° around Y so the
-  // quad's front face points toward the viewer rather than away from them.
-  const flipY = useMemo(
-    () => new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), Math.PI),
-    [],
-  )
+  // Pattern copied directly from ComfortVignette — the one head-locked mesh already
+  // proven to work in VR.
+  const headMatrix = useMemo(() => new Matrix4(), [])
+
+  // Scratch objects for the offset computation.
+  const _right = useMemo(() => new Vector3(), [])
+  const _up = useMemo(() => new Vector3(), [])
+  const _fwd = useMemo(() => new Vector3(), [])
+  const _headQuat = useMemo(() => new Quaternion(), [])
 
   useFrame(() => {
     const dome = mesh.current
@@ -80,30 +91,30 @@ export function HudOverlay({
 
     const head = gl.xr.isPresenting ? gl.xr.getCamera() : camera
 
-    dome.position.copy(head.position)
-    // Copy head orientation then rotate 180° around local Y so the quad's +Z face
-    // (the visible front of a PlaneGeometry) points toward the camera rather than
-    // away from it.
-    dome.quaternion.copy(head.quaternion).multiply(flipY)
-
-    // Apply head-local offset rotated into world space.
-    const q = head.quaternion
-    const [ox, oy, oz] = offset
-
-    // Camera basis: local right (1,0,0), up (0,1,0), forward (0,0,-1)
-    rotateVec(q, { x: 1, y: 0, z: 0 }, scratchRight)
-    rotateVec(q, { x: 0, y: 1, z: 0 }, scratchUp)
-    rotateVec(q, { x: 0, y: 0, z: -1 }, scratchForward)
-
-    dome.position.x += scratchRight.x * ox + scratchUp.x * oy + scratchForward.x * oz
-    dome.position.y += scratchRight.y * ox + scratchUp.y * oy + scratchForward.y * oz
-    dome.position.z += scratchRight.z * ox + scratchUp.z * oy + scratchForward.z * oz
-
+    // Identical to ComfortVignette: read the world matrix of the XR camera (VR) or
+    // desktop camera, and decompose into position + quaternion + scale.
+    headMatrix.copy(head.matrixWorld)
+    headMatrix.decompose(dome.position, _headQuat, dome.scale)
     dome.scale.set(1, 1, 1)
 
-    // Redraw the canvas every frame. Both HUDs are tiny (200x200 and 256x64) and the
-    // drawing ops are trivial — caching the static portions would save microseconds on
-    // a canvas this small.
+    // Rotate 180° around local Y so the PlaneGeometry's +Z face (the front) points
+    // toward the viewer rather than away from them.  The camera looks along -Z.
+    dome.quaternion.copy(_headQuat).multiply(
+      new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), Math.PI),
+    )
+
+    // Apply the head-local offset rotated into world space.
+    // Basis vectors rotated by the *head's* orientation, not the quad's.
+    const [ox, oy, oz] = offset
+    _right.set(1, 0, 0).applyQuaternion(_headQuat)
+    _up.set(0, 1, 0).applyQuaternion(_headQuat)
+    _fwd.set(0, 0, -1).applyQuaternion(_headQuat)
+
+    dome.position.x += _right.x * ox + _up.x * oy + _fwd.x * oz
+    dome.position.y += _right.y * ox + _up.y * oy + _fwd.y * oz
+    dome.position.z += _right.z * ox + _up.z * oy + _fwd.z * oz
+
+    // Redraw the canvas.
     const ctx = canvasEl.getContext('2d')
     if (ctx) {
       ctx.clearRect(0, 0, canvasEl.width, canvasEl.height)
@@ -121,24 +132,4 @@ export function HudOverlay({
       renderOrder={renderOrder}
     />
   )
-}
-
-/** Rotate a vector by a quaternion. */
-function rotateVec(
-  q: { x: number; y: number; z: number; w: number },
-  v: { x: number; y: number; z: number },
-  out: { x: number; y: number; z: number },
-): void {
-  const qx = q.x, qy = q.y, qz = q.z, qw = q.w
-  const vx = v.x, vy = v.y, vz = v.z
-
-  // q * v * q⁻¹
-  const ix = qw * vx + qy * vz - qz * vy
-  const iy = qw * vy + qz * vx - qx * vz
-  const iz = qw * vz + qx * vy - qy * vx
-  const iw = -qx * vx - qy * vy - qz * vz
-
-  out.x = ix * qw + iw * -qx + iy * -qz - iz * -qy
-  out.y = iy * qw + iw * -qy + iz * -qx - ix * -qz
-  out.z = iz * qw + iw * -qz + ix * -qy - iy * -qx
 }

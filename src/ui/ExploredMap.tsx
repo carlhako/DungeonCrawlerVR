@@ -15,7 +15,6 @@ import { useDungeon } from '@/systems/dungeon/store'
 import { playerState } from '@/systems/player'
 import { CELL_SIZE } from '@/systems/dungeon/generate'
 import { isExplored } from '@/systems/dungeon/explored'
-import { useRun } from '@/systems/run'
 import { HudOverlay } from '@/ui/HudOverlay'
 
 /** Canvas pixel size. Small — it is a corner map, not a full-screen one. */
@@ -151,14 +150,8 @@ function roundRect(
 }
 
 export function ExploredMap() {
-  const phase = useRun((state) => state.phase)
-  const hasDungeon = useDungeon((state) => !!state.map)
-
-  // Visible during wave, waveComplete, and death — any time the player is in the dungeon
-  // or has just left it. Hidden in the foyer proper.
-  if (phase === 'foyer' || phase === 'loading') return null
-  if (!hasDungeon) return null
-
+  // Always mounted for debugging. The dungeon check means it draws an empty panel
+  // when there's no dungeon.
   return (
     <HudOverlay
       sizeMetres={SIZE_M}

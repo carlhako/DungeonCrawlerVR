@@ -9,7 +9,6 @@
  * canvas quad via `HudOverlay` so it works in both desktop and VR.
  */
 
-import { useRun } from '@/systems/run'
 import { director } from '@/systems/enemies/state'
 import { HudOverlay } from '@/ui/HudOverlay'
 
@@ -74,9 +73,8 @@ function draw(ctx: CanvasRenderingContext2D, w: number, h: number): void {
 }
 
 export function EnemyCounter() {
-  const phase = useRun((state) => state.phase)
-
-  if (phase !== 'wave') return null
+  // const phase = useRun((state) => state.phase)
+  // if (phase !== 'wave') return null
 
   return (
     <HudOverlay
