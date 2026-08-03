@@ -77,14 +77,22 @@ export function DesktopWeaponRig() {
    * fires from exactly the right place — and is never rendered. The weapon worked and was
    * invisible, which is the most confusing possible pair of symptoms. Putting the camera in
    * the scene costs nothing: a camera draws nothing itself.
+   *
+   * Only while there is no session. `state.camera` is not stable: entering VR swaps it to
+   * `gl.xr.getCamera()` (`@react-three/xr`'s `<XR>`), which `XROrigin` has already parented
+   * under the player rig so the head moves and turns with it. Re-adding *that* camera here
+   * on the same identity-change effect would rip it back out to the scene root — the head
+   * keeps tracking, but disconnected from the rig, so walking and turning stop doing
+   * anything visible. Skipping while `inSession` leaves the XR camera's parent alone.
    */
   useEffect(() => {
+    if (inSession) return
     if (camera.parent === scene) return
     scene.add(camera)
     return () => {
       scene.remove(camera)
     }
-  }, [camera, scene])
+  }, [camera, scene, inSession])
 
   // In a session the controllers own the weapons and the camera belongs to the headset.
   // Leaving a viewmodel welded to the player's face would be both.
@@ -213,9 +221,16 @@ function WeaponRigBody({
      */
     const ready = cooldownProgress(handWeapons[slot].cooldown, rate)
     if (glow.current) {
-      const base = melee ? 0.45 : 5
+      const base = melee ? 0.9 : 2.4
       // Never fully dark: an unlit weapon in a dark corridor is a weapon you cannot find.
-      glow.current.emissiveIntensity = base * (0.25 + 0.75 * ready)
+      const MIN_FRACTION = 0.12
+      // Squared rather than linear: a linear ramp spends most of a fast weapon's cooldown
+      // already near full brightness (half-charged reads five-sixths as bright as ready),
+      // so the dim state is a flicker nobody catches at a glance. Squaring holds it down
+      // for the first half of the window and saves the climb for the last stretch, which is
+      // also the read that matters — "nearly ready" rather than "just fired".
+      const factor = MIN_FRACTION + (1 - MIN_FRACTION) * ready * ready
+      glow.current.emissiveIntensity = base * factor
     }
 
     // The mana bar rides the weapon too, and only on something that spends mana. A bar

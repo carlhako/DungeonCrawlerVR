@@ -7,8 +7,8 @@ sprint, before committing. The roadmap itself lives in [PLAN.md](PLAN.md).
 
 ## Current position
 
-> **Epics 0 and 1 are signed off on the Quest 3, and so is Sprint 2.1. Sprint 2.2 — the
-> weapon & attack framework — is built and awaiting its headset pass.**
+> **Epics 0 and 1 are signed off on the Quest 3, and so is Sprint 2.1 and Sprint 2.2 — the
+> weapon & attack framework. Sprint 2.3 — enemies, AI and the wave loop — is next.**
 >
 > There are weapons in your hands now, and three training dummies in the foyer to try them
 > on. The Emberwand throws arcing fire bolts that cost mana and set things burning; the
@@ -39,7 +39,7 @@ sprint, before committing. The roadmap itself lives in [PLAN.md](PLAN.md).
 | | 1.3 Shop & weapon dialog | ✅ Verified on Quest 3 |
 | | 1.4 In-world options & new game | ✅ Verified on Quest 3 |
 | **2 — Wave Combat Core** | 2.1 Procedural dungeon generation | ✅ Verified on Quest 3 |
-| | 2.2 Weapon & attack framework | 🟨 Built — awaiting headset pass |
+| | 2.2 Weapon & attack framework | ✅ Verified on Quest 3 |
 | | 2.3 Enemies, AI & wave loop | ⬜ |
 | | 2.4 Hit feedback & VFX | ⬜ |
 | **3 — Fear & Atmosphere** | 3.1 Darkness & lighting | ⬜ |
@@ -691,7 +691,7 @@ Known scaffolding, and the one deliberate gap:
 - The wave still clears by walking back into the foyer. **Sprint 2.3**'s Wave Director takes
   that over, along with the spawn points and the nav grid this sprint bakes for it.
 
-### 🟨 Sprint 2.2 — Weapon & attack framework
+### ✅ Sprint 2.2 — Weapon & attack framework
 
 **Verified on desktop:** typecheck clean · 474/474 unit tests · production build succeeds ·
 smoke test walks up to a training dummy, holds the trigger, and checks that health came off,
@@ -780,6 +780,38 @@ Decisions made during the sprint:
 - **Desktop melee is one animation, not a second damage path.** The viewmodel's arc moves the
   same anchor a real arm moves, and the same speed rule measures it. The "active hitbox
   window" the plan asks for is not a flag: it is the blade actually moving fast enough.
+
+**Headset pass 1 (2026-08-03) — two defects, both fixed.** Reported: "I can no longer move or
+turn" in VR; and, against the README's own acceptance line, "[the wand's tip] doesn't change
+brightness, or if it does its not enough — it seems to be the same brightness all the time."
+
+- **Entering VR froze movement and turning completely.** `@react-three/xr`'s `<XR>` swaps
+  R3F's `state.camera` to `gl.xr.getCamera()` the instant a session starts, and `XROrigin`
+  parents that camera under the player rig so the head moves and turns with it.
+  `DesktopWeaponRig`'s new `scene.add(camera)` effect (below) had `camera` in its dependency
+  array, so it fired again on that swap and reparented the XR camera onto the scene root —
+  the headset kept tracking, but disconnected from the rig, so walking the capsule or
+  snap/smooth-turning the yaw group no longer moved what you saw. Fixed by skipping the
+  effect entirely while `inSession`, so it only ever touches the desktop camera.
+- **The wand's cooldown glow read as constant.** Two compounding causes: the emissive
+  intensity (`base * (0.25 + 0.75 * ready)`, base 5) pushed a saturated element colour like
+  fire's past 1.0 on most channels at *both* ends of the cooldown, so the display clipped the
+  "just fired" and "fully ready" states to nearly the same bright colour; and `ready` ramped
+  linearly, so a fast weapon like the Emberwand (rate 3.2/s) spent most of its ~0.3s cycle
+  already past halfway brightness — the genuinely dim moment was one or two fixed steps, too
+  short to register at a glance. Fixed by lowering peak intensity (wand 5→2.4, blade 0.45→0.9)
+  so the bright end has headroom instead of clipping to the same colour as the dim end, and by
+  squaring the cooldown fraction so the tip stays visibly dim through the first half of the
+  window and saves the climb for the last stretch — the read that actually matters, "nearly
+  ready" rather than "just fired". Both weapon archetypes share this code, so the Boneshard
+  Staff — a slower weapon, more time to read — gets the same fix for free.
+
+**Verified on the Quest 3 (2026-08-03).** Full acceptance test passed: the Emberwand fires
+arcing bolts from the tip, its mana bar drains and refills, its cooldown tip now visibly dims
+and brightens; the Frostbrand only cuts on a real swing, not on walking into a dummy or
+stick-turning with the blade held out; the resistant dummy visibly takes less from the same
+element; a burning-to-death dummy dies through the same path as everything else. Movement and
+turning work throughout a session. Sprint 2.2 is signed off.
 
 Known scaffolding, and the gaps:
 
