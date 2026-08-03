@@ -225,6 +225,55 @@ Every sprint ends with a **testable build**. Sprints from 0.2 onward are verifie
 - Floating damage numbers billboarded in world space.
 - ✅ **Test:** side-by-side playtest — combat reads as punchy in both modes, and nothing in VR moves the camera without the player's head.
 
+**Sprint 2.7 — Enemy models & textures**
+- Added after 2.6, because by then everything an enemy *does* was right and it still looked
+  like three capsules. This is the sprint that finally closes the CC0 art gap this project has
+  carried since 1.1 — for enemies only. The foyer, the dungeon and the weapons stay primitives
+  until someone decides otherwise; enemies come first because they are the thing the player
+  looks at hardest and the only thing that moves.
+- **The kit is Quaternius (CC0).** Rigged, animated GLB monsters, public domain, no account
+  and no attribution requirement. Carl downloads the pack and puts it in `public/models/` —
+  fetching an asset pack is a deliberate decision and it is his to make, not something to do
+  mid-sprint. Everything below is written so the sprint can be built *before* the files land
+  and finished the moment they do.
+- **One loader, one place.** GLBs are loaded once at startup and cached, never per spawn:
+  `Enemies.tsx` mounts one group per pool slot and nothing mounts or unmounts during a wave,
+  which is the rule that keeps a skeleton coming round a corner from costing a material
+  compile. A model arriving asynchronously must not stall the wave — a slot draws its current
+  primitive until its model is ready, and swaps.
+- **`EnemyShape` is the seam.** Sprint 2.3 said swapping in a kit is a change to that
+  component alone, and this sprint is the test of that claim. If it turns out not to be true,
+  the fix belongs there rather than in a second rendering path.
+- **The readability rules from 2.3 survive the swap, or the swap is a regression.** Every AI
+  state has to stay legible across a dark room: the telegraph rearing back, the walking bob
+  following actual speed, the eyes carrying the wind-up, the halo that makes something visible
+  before the torchlight reaches it. A model with a beautiful idle and an unreadable wind-up is
+  worse than the capsule. Where the kit's own clips can carry a state, they should; where they
+  cannot, the procedural channel stays.
+- **Animation.** One `AnimationMixer` per pool slot, clips mapped to AI phases (idle, chase,
+  telegraph, strike, recover, stagger, dying) with the mapping as *data* in `src/data/enemies.ts`
+  next to the numbers, not as a switch in a component. Clip playback is visual, driven on the
+  render frame — no AI decision may depend on an animation event.
+- **The material contract with 2.6.** The dissolve is injected with `onBeforeCompile` and
+  samples noise in object space; on a skinned mesh that is the bind pose, which is the right
+  answer — the pattern stays welded to the body. Every imported material an enemy uses has to
+  go through the same injection, and the hit flash, the burning tint and the chill tint have to
+  keep working on whatever the kit ships (they currently write `emissive` on a material we
+  built ourselves). This is the most likely thing to break silently.
+- **Hit spheres stay the hit test.** Nothing about collision changes: a model is drawing.
+  `three-mesh-bvh` finally has meshes to build over, and the honest answer is still probably
+  no — a swept segment against one sphere is cheaper than a BVH query, and a *generous* hit
+  volume is a better game than an exact one. Revisit only if the silhouette makes the sphere
+  read as wrong.
+- **Budget before beauty.** Triangle count, draw calls and texture memory measured on the
+  Quest 3 with a full wave standing, against the numbers 2.1 established. Textures compressed
+  to KTX2/Basis if the raw PNGs blow the budget; a wave that drops below 72fps because the
+  skeletons look nice is a wave that ships as capsules.
+- ✅ **Test:** clear a wave in the headset. Every enemy reads as a *creature* rather than a
+  capsule, and from across a dark room you can still tell — without being told which is which
+  — a Skulker from a Warrior from a Wraith, and a wind-up from a walk, in time to step out of
+  it. Frame time with a full wave on screen is no worse than it was with primitives.
+
 ---
 
 ### Epic 3 — Fear & Atmosphere

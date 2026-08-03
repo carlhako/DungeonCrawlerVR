@@ -15,8 +15,10 @@ sprint, before committing. The roadmap itself lives in [PLAN.md](PLAN.md).
 > top-centre and the minimap bottom-left. Sprint 2.6 — hit feedback & VFX — is also
 > desktop-green and awaiting its Quest 3 pass: bolts leave a muzzle flash and a trail, hits
 > throw sparks, kills come apart in ash and dissolve, and the camera never moves in VR.
-> Epic 2 is complete on the desktop; Epic 3 — darkness, audio and horror direction — is next,
-> with four Quest 3 passes outstanding behind it.**
+> Sprint 2.7 — enemy models & textures — was added after 2.6, and is next: everything an
+> enemy *does* is right and it still looks like three capsules. It needs the Quaternius CC0
+> pack dropped into `public/models/` before it can finish, and four Quest 3 passes are
+> outstanding behind it.**
 >
 > **There is something in the dungeon now.** Open the door, walk down the passage into the
 > generated level, and a wave composed from the wave number comes looking for you: Goblin
@@ -60,6 +62,7 @@ sprint, before committing. The roadmap itself lives in [PLAN.md](PLAN.md).
 | | 2.4 Stealth & enemy awareness | ✅ Desktop green — Quest 3 pass outstanding |
 | | 2.5 HUD overlays: enemy counter & map | ✅ Desktop green — Quest 3 pass outstanding |
 | | 2.6 Hit feedback & VFX | ✅ Desktop green — Quest 3 pass outstanding |
+| | 2.7 Enemy models & textures | ⬜ Next — needs the Quaternius pack in `public/models/` |
 | **3 — Fear & Atmosphere** | 3.1 Darkness & lighting | ⬜ |
 | | 3.2 Spatial audio | ⬜ |
 | | 3.3 Horror direction | ⬜ |
