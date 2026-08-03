@@ -172,8 +172,17 @@ Enter VR and confirm, in order:
     does. **Restore defaults** puts everything back. Reload; your choices are still there.
 13. **The dungeon** — open the door and keep walking down the passage. It should lead into a
     generated level rather than a dead end: rooms and corridors, lit by torches with real
-    darkness between them. Check you can walk a long way in and back out without meeting an
-    invisible wall, and that the frame HUD holds up in the biggest room you can find.
+    darkness between them. Every torch is a visible sconce on the wall — a flame and a
+    bracket, not a glow coming from nowhere. Check you can walk a long way in and back out
+    without meeting an invisible wall. In the biggest room you can find, turn your head
+    steadily and watch for judder: the world should track smoothly rather than stepping or
+    smearing behind you. There is no fps readout in the headset yet (the `F1` HUD is DOM, so
+    it does not composite into a VR session) — Sprint 3.1 owns that.
+    Walking towards a dark torch, its light should grow the way an ember catches — quick at
+    first, then settling in — not switch on and climb at a steady rate. Walking away, it
+    should fade the same way in reverse; it should never fade partway and then cut out. If
+    either still looks wrong, report it — ideally which part (the onset, the overall speed, or
+    a sudden cutoff) and roughly how far you were from the torch.
 14. **Starting over** — turn around. The "new game" plaque is on the back wall behind the
     spawn. One press arms it and it says so; a second wipes gold, weapons and upgrades back
     to a first launch. Leave it armed and walk away — it must stand down by itself. Then

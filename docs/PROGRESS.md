@@ -7,10 +7,10 @@ sprint, before committing. The roadmap itself lives in [PLAN.md](PLAN.md).
 
 ## Current position
 
-> **Epic 1 is signed off on the Quest 3. Sprint 2.1 — procedural dungeon generation — is
-> built and awaiting its headset pass.**
+> **Epics 0 and 1 are signed off on the Quest 3, and so is Sprint 2.1. Sprint 2.2 — the
+> weapon & attack framework — is next.**
 >
-> Opening the foyer door now leads down the passage into a generated dungeon: rooms and
+> Opening the foyer door leads down the passage into a generated dungeon: rooms and
 > corridors, torch-lit, dark between the torches, different every wave and identical for the
 > same wave. There is still nothing in it to fight — that is 2.3 — so walking back into the
 > foyer still counts as clearing the wave.
@@ -33,8 +33,8 @@ sprint, before committing. The roadmap itself lives in [PLAN.md](PLAN.md).
 | | 1.2 Game state & persistence | ✅ Done |
 | | 1.3 Shop & weapon dialog | ✅ Verified on Quest 3 |
 | | 1.4 In-world options & new game | ✅ Verified on Quest 3 |
-| **2 — Wave Combat Core** | 2.1 Procedural dungeon generation | 🟨 Built — awaiting headset pass |
-| | 2.2 Weapon & attack framework | ⬜ |
+| **2 — Wave Combat Core** | 2.1 Procedural dungeon generation | ✅ Verified on Quest 3 |
+| | 2.2 Weapon & attack framework | 🟦 In progress |
 | | 2.3 Enemies, AI & wave loop | ⬜ |
 | | 2.4 Hit feedback & VFX | ⬜ |
 | **3 — Fear & Atmosphere** | 3.1 Darkness & lighting | ⬜ |
@@ -545,9 +545,9 @@ Decisions made during the sprint:
 - Known scaffolding: the F2 panel stays for now. It tunes things the player has no business
   setting (physics, lighting, collider display), and it is still the faster tool at a desk.
 
-### 🟨 Sprint 2.1 — Procedural dungeon generation
+### ✅ Sprint 2.1 — Procedural dungeon generation
 
-**Verified on desktop:** typecheck clean · 344/344 unit tests · production build succeeds ·
+**Verified on desktop:** typecheck clean · 365/365 unit tests · production build succeeds ·
 smoke test opens the door, walks 16m down the passage into the generated level, and checks
 the player is standing on a cell the generator calls floor — then walks back out, which puts
 the level away.
@@ -565,8 +565,10 @@ Delivered:
 - `src/systems/dungeon/nav.ts` — the navigation bake and 8-way A*, ready for the enemies in
   2.3. Diagonals need both orthogonals open, so nothing squeezes through a wall corner.
 - `src/systems/dungeon/store.ts` — the live dungeon and its placement in the world.
-- `src/scenes/Dungeon.tsx` — the level as geometry: three instanced meshes, merged wall
-  colliders, and a pool of four torch lights moved onto whichever torches are nearest.
+- `src/scenes/Dungeon.tsx` — the level as geometry: instanced meshes, merged wall colliders,
+  and a small pool of torch lights moved onto whichever torches are nearest.
+- `src/systems/lightPool.ts` — which torches get a real light, and how a light hands over
+  from one torch to the next without the player seeing it happen. Pure and unit-tested.
 - `src/ui/DungeonMapView.tsx` — the `F3` top-down debug map: rooms, torches, spawns, and
   where you are. The only non-diegetic UI in the game, and dev-only.
 - `src/core/debug.ts` — `__DCVR__.render` (draw calls, triangles, live lights) and
@@ -590,8 +592,8 @@ Decisions made during the sprint:
 - **One seed per wave, forever.** Wave 3 is always the same dungeon: the player gets to learn
   a level rather than being handed noise, and "wave 3 is broken" becomes a complete bug
   report.
-- **Four lights, seventy torches.** Every torch is emissive geometry — free, and visible far
-  enough away to read a corridor before you are in it — and a pool of four point lights moves
+- **Six lights, seventy torches.** Every torch is emissive geometry — free, and visible far
+  enough away to read a corridor before you are in it — and a small pool of point lights moves
   onto the nearest ones. Moving lights rather than mounting one per torch matters: creating
   and destroying lights recompiles every material they touch, which on a Quest is a hitch
   every few steps as you walk.
@@ -603,6 +605,74 @@ Decisions made during the sprint:
 - The passage cap got **its own rigid body**. A Rapier body with `colliders="cuboid"` builds
   its colliders from the children it had when it mounted, so removing the cap's mesh left the
   collider standing — an invisible wall exactly where the dungeon was supposed to start.
+
+### 2.1 — headset pass 1, two defects fixed
+
+Reported from the Quest: *"as you walk into dark rooms the lights come on as you get closer,
+like they are triggered"*, and *"I can't see the lamps, it's like they are on the other side
+of the wall"*.
+
+- **The flames were inside the wall.** The offset from the wall cell's centre *subtracted* the
+  clearance where it should have added it, putting every 9cm flame 12cm short of the wall
+  face — that is, buried in solid rock. Only the point light, which is not occluded, escaped;
+  hence light with no visible source. Torches are now a flame standing clear of the face, a
+  dark bracket below it, and a small additive halo so an unlit torch still reads as fire from
+  across a room. Three instanced draws for every torch in the level.
+- **The light pop-in took two attempts.** Fading a torch out by distance was the obvious first
+  fix and it barely moved the measurement, because range fade only smooths a torch on its way
+  *out*. Rounding a corner onto a torch three metres away lands inside the full-brightness
+  radius, so the slot still jumped straight to full. The second attempt rate-limited every
+  slot towards its target — fixed the jump, but still read as "the light switches on" from the
+  headset, because a fixed-duration *linear* ramp has a hard onset: constant velocity from a
+  standing start. The third attempt is what's in now: an **exponential** ease (`GROWTH_TAU` in
+  `src/systems/lightPool.ts`) that moves a shrinking fraction of the remaining gap each
+  instant — fastest when furthest off, decelerating into the target, the difference between an
+  ember catching and a bulb being switched on. Flicker was also pulled out of the ramped value
+  entirely: it used to share a timescale with the ramp, which meant tuning one always fought
+  the other; flicker is now applied to the ramp's *output*, once per frame, so the two no
+  longer trade off against each other. A reassigned slot still drives itself to zero before
+  swapping torch and ramping up on the other side — the light only ever moves while dark —
+  and slots still hold their torch under hysteresis so two similar-distance torches don't trade
+  a light back and forth as the player turns. The visual falloff's own start point also moved
+  further out (`FALLOFF_START`, separated from the unrelated hysteresis threshold that used to
+  share its value), widening the distance over which a torch visibly grows on approach.
+- The pool went from four lights to six. Four covered about one room, so the fifth torch in a
+  large room stayed dark until the player displaced one.
+- **A fourth pass, from the headset: torches faded, then suddenly switched off.** Splitting
+  `FALLOFF_START` from the hysteresis threshold (previous point) widened *where a torch starts
+  dimming* without widening *where it becomes safe to take from its slot* — they'd shared one
+  value before. A torch between the old hold distance and the new, wider fade start could be
+  60-70% bright and still lose its slot to a nearer competitor, hitting the fast handover drop
+  — which is only invisible when it starts near zero — while clearly lit. `HOLD_FRACTION`
+  moved out to 0.82 to fix that, and `stepLightSlot` gained a third case: a slot that has
+  simply lost budget contention, with nothing else waiting for it, now eases towards zero *in
+  place* at the same unhurried pace as growth, rather than being forced through the fast drop
+  meant only for an active handover. That also means a slot picks its own torch back up
+  without restarting if the player just oscillates near the edge of its range, since the slot
+  never actually let go of it.
+
+Worth recording, because it cost time twice: the *feel* of this ramp **cannot be judged under
+SwiftShader**. Headless frames run at roughly 0.6s each and the fixed-step loop catches up
+across them, so a metre of walking spans hundreds of simulation steps and every per-frame or
+per-metre intensity metric is dominated by movement rather than by the ramp's own shape — it
+could not tell a linear ramp from an exponential one, which is exactly the distinction that
+mattered. What headless verification actually proves here is the *invariants*: unit tests pin
+that no input — reassignment, a torch appearing point-blank, a flicker spike — can move a slot
+by more than its rate allows, and that the exponential phase's per-frame step strictly shrinks
+rather than holding constant. Screenshots earn their keep for *placement*, not smoothness.
+Whether the ease itself now reads as natural, rather than merely bounded, is a headset call.
+
+Also corrected: headset checklist item 13 told Carl to watch the frame HUD in the biggest
+room. `r3f-perf` is a DOM overlay and does not composite into an immersive session, so there
+was nothing to look at. The item now asks for judder on head turns, and notes that an
+in-headset readout is Sprint 3.1's job — which that sprint's own acceptance test requires, so
+it cannot ship without one.
+
+**Verified on the Quest 3 (2026-08-03), on the second pass.** The door leads into a generated
+level, the torches read as sconces on the wall rather than light from nowhere, the level can be
+walked deep into and back out of without an invisible wall, and the lights now grow and fade the
+way an ember catches instead of switching on — no partway fade-then-cutoff. Sprint 2.1 is
+signed off; the light pool's remaining work is Sprint 3.1's budget manager, not a defect.
 
 Known scaffolding, and the one deliberate gap:
 

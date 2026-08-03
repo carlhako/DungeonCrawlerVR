@@ -1,9 +1,17 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { CuboidCollider, RigidBody } from '@react-three/rapier'
-import { InstancedMesh, Matrix4, Object3D, PointLight, Vector3 } from 'three'
+import { AdditiveBlending, InstancedMesh, Matrix4, Object3D, PointLight, Vector3 } from 'three'
 import { SystemOrder } from '@/core/loop'
 import { useFixedUpdate } from '@/core/simulation'
 import { playerState } from '@/systems/player'
+import {
+  assignLightSlots,
+  DROP_SECONDS,
+  HOLD_FRACTION,
+  rangeFalloff,
+  stepLightSlot,
+  type LightSlot,
+} from '@/systems/lightPool'
 import { flicker } from '@/systems/torch'
 import { CELL_SIZE, Tile, WALL_HEIGHT, type DungeonMap } from '@/systems/dungeon/generate'
 import { placedCellToWorld, useDungeon, type DungeonPlacement } from '@/systems/dungeon/store'
@@ -28,8 +36,25 @@ import { placedCellToWorld, useDungeon, type DungeonPlacement } from '@/systems/
  *   reads as fire at a distance. Sprint 3.1 owns this properly — this is the honest minimum.
  */
 
-/** How many torches may be real lights at once. The single most expensive thing in a frame. */
-const LIT_TORCHES = 4
+/**
+ * How many torches may be real lights at once. The single most expensive thing in a frame.
+ *
+ * Four was too few to be honest about: torches stand ~8m apart, so four lights cover roughly
+ * one room, and the fifth torch in a big room stayed dark until the player walked far enough
+ * in to displace one. Six is still a small number of forward lights and buys most of a large
+ * room at once. Sprint 3.1 profiles this on the headset and sets it properly.
+ */
+const LIT_TORCHES = 6
+
+/**
+ * How far the flame stands clear of the wall face, in metres.
+ *
+ * Measured from the face, not from the cell centre — see the comment where it is applied.
+ */
+const FLAME_CLEARANCE = 0.18
+
+/** Above head height, below the three-metre ceiling. */
+const TORCH_HEIGHT = 2.2
 
 /**
  * Candela, with quadratic falloff — so this number is much larger than it looks.
@@ -236,60 +261,124 @@ function Colliders({ placement, strips }: { placement: DungeonPlacement; strips:
 function Torches({ placement }: { placement: DungeonPlacement }) {
   const { map } = placement
   const flames = useRef<InstancedMesh>(null)
+  const halos = useRef<InstancedMesh>(null)
+  const brackets_ = useRef<InstancedMesh>(null)
   const lights = useRef<Array<PointLight | null>>([])
 
   const positions = useMemo(
     () =>
       map.torches.map((torch) => {
         const world = placedCellToWorld(placement, torch.x, torch.y)
-        // Mounted on the face of the wall, not in the middle of it, and above head height.
-        return new Vector3(
-          world.x + torch.dx * (CELL_SIZE / 2 - 0.12),
-          2.2,
-          world.z + torch.dy * (CELL_SIZE / 2 - 0.12),
-        )
+        // `world` is the *wall cell's* centre, and the wall's face is half a cell along the
+        // direction the torch points, so the flame has to sit further out than that — not
+        // nearer. The first pass subtracted the clearance instead of adding it and buried
+        // every flame twelve centimetres inside solid rock, which in a headset reads as
+        // torches mounted on the far side of the wall.
+        const out = CELL_SIZE / 2 + FLAME_CLEARANCE
+        return new Vector3(world.x + torch.dx * out, TORCH_HEIGHT, world.z + torch.dy * out)
+      }),
+    [map, placement],
+  )
+
+  // The bracket bridges the gap back to the wall, so a flame reads as something mounted
+  // rather than as a ball hanging in mid-air.
+  const brackets = useMemo(
+    () =>
+      map.torches.map((torch) => {
+        const world = placedCellToWorld(placement, torch.x, torch.y)
+        const out = CELL_SIZE / 2 + FLAME_CLEARANCE / 2
+        return {
+          // Below the flame, not behind it: an unlit bracket sitting inside the glow is a
+          // black notch in the middle of a fire, which reads as a hole rather than a sconce.
+          position: new Vector3(
+            world.x + torch.dx * out,
+            TORCH_HEIGHT - 0.26,
+            world.z + torch.dy * out,
+          ),
+          angle: Math.atan2(torch.dx, torch.dy),
+        }
       }),
     [map, placement],
   )
 
   useEffect(() => {
-    const mesh = flames.current
-    if (!mesh) return
     const matrix = new Matrix4()
-    positions.forEach((position, index) => {
-      matrix.makeTranslation(position.x, position.y, position.z)
-      mesh.setMatrixAt(index, matrix)
+    for (const mesh of [flames.current, halos.current]) {
+      if (!mesh) continue
+      positions.forEach((position, index) => {
+        matrix.makeTranslation(position.x, position.y, position.z)
+        mesh.setMatrixAt(index, matrix)
+      })
+      mesh.instanceMatrix.needsUpdate = true
+      mesh.computeBoundingSphere()
+    }
+
+    const mesh = brackets_.current
+    if (!mesh) return
+    const dummy = new Object3D()
+    brackets.forEach((bracket, index) => {
+      dummy.position.copy(bracket.position)
+      dummy.rotation.set(0, bracket.angle, 0)
+      dummy.updateMatrix()
+      mesh.setMatrixAt(index, dummy.matrix)
     })
     mesh.instanceMatrix.needsUpdate = true
     mesh.computeBoundingSphere()
-  }, [positions])
+  }, [positions, brackets])
 
-  const scratch = useMemo(() => ({ nearest: [] as Array<{ index: number; distance: number }> }), [])
+  const scratch = useMemo(
+    () => ({
+      distances: [] as number[],
+      wanted: new Array<number | null>(LIT_TORCHES).fill(null),
+      slots: Array.from({ length: LIT_TORCHES }, () => ({
+        torch: null,
+        intensity: 0,
+      })) as LightSlot[],
+    }),
+    [],
+  )
 
   useFixedUpdate(
-    (_dt, elapsed) => {
+    (dt, elapsed) => {
       const { x, z } = playerState.position
-      scratch.nearest.length = 0
+      scratch.distances.length = positions.length
       positions.forEach((position, index) => {
         const dx = position.x - x
         const dz = position.z - z
-        scratch.nearest.push({ index, distance: dx * dx + dz * dz })
+        scratch.distances[index] = Math.sqrt(dx * dx + dz * dz)
       })
-      scratch.nearest.sort((a, b) => a.distance - b.distance)
 
-      for (let slot = 0; slot < LIT_TORCHES; slot++) {
-        const light = lights.current[slot]
+      // Which torches deserve a light — subject to hysteresis, so this answer is stable as
+      // the player turns rather than re-sorting under them.
+      scratch.wanted = assignLightSlots(
+        scratch.slots.map((slot) => slot.torch),
+        scratch.distances,
+        LIT_TORCHES,
+        TORCH_RANGE * HOLD_FRACTION,
+        TORCH_RANGE,
+      )
+
+      for (let index = 0; index < LIT_TORCHES; index++) {
+        const light = lights.current[index]
         if (!light) continue
-        const pick = scratch.nearest[slot]
-        // Out of range as well as out of budget: a light dragged across the level to a torch
-        // forty metres away lights nothing and still costs a shadowless full pass.
-        if (!pick || pick.distance > TORCH_RANGE * TORCH_RANGE) {
-          light.intensity = 0
-          continue
-        }
-        const position = positions[pick.index] as Vector3
-        light.position.copy(position)
-        light.intensity = TORCH_INTENSITY * flicker(elapsed, pick.index)
+        const want = scratch.wanted[index] ?? null
+
+        // The slow, proximity-driven envelope — no flicker in it. Flicker is fast and this
+        // ramp is deliberately slow; folding one into the other either smears the fire into
+        // mush or lets the pop back in through the flicker's own speed. See lightPool.ts.
+        const envelope =
+          want == null
+            ? 0
+            : TORCH_INTENSITY * rangeFalloff(scratch.distances[want] as number, TORCH_RANGE)
+
+        const before = scratch.slots[index] as LightSlot
+        const slot = stepLightSlot(before, want, envelope, dt, TORCH_INTENSITY / DROP_SECONDS)
+        scratch.slots[index] = slot
+
+        // Position follows the slot's own torch, not the wanted one: during a handover the
+        // slot is still on the old torch, winding down where it stands. It only moves at zero.
+        if (slot.torch != null) light.position.copy(positions[slot.torch] as Vector3)
+        light.intensity = slot.torch == null ? 0 : slot.intensity * flicker(elapsed, slot.torch)
       }
     },
     SystemOrder.Effects,
@@ -298,14 +387,36 @@ function Torches({ placement }: { placement: DungeonPlacement }) {
 
   return (
     <group>
+      {/* Unlit stone: the bracket is only ever seen against its own torch. */}
+      <instancedMesh args={[undefined, undefined, brackets.length]} ref={brackets_}>
+        <boxGeometry args={[0.05, 0.3, FLAME_CLEARANCE]} />
+        <meshStandardMaterial color={STONE_DARK} roughness={1} />
+      </instancedMesh>
+
       <instancedMesh args={[undefined, undefined, positions.length]} ref={flames}>
-        <sphereGeometry args={[0.09, 8, 6]} />
+        <sphereGeometry args={[0.13, 8, 6]} />
         {/* Emissive and un-tone-mapped, so a flame reads as fire rather than as a grey ball
             in a room with no light in it. */}
         <meshStandardMaterial
           color="#ffcf8a"
           emissive={TORCH_COLOUR}
-          emissiveIntensity={4}
+          emissiveIntensity={5}
+          toneMapped={false}
+        />
+      </instancedMesh>
+
+      {/* The glow around the flame, and the reason a torch outside the light budget is still
+          worth walking towards: it is visible at any distance for the cost of one more
+          instanced draw, so a dark corridor still tells you where its torches are. Additive
+          and depth-write-off so it never occludes the flame inside it. */}
+      <instancedMesh args={[undefined, undefined, positions.length]} ref={halos}>
+        <sphereGeometry args={[0.32, 8, 6]} />
+        <meshBasicMaterial
+          color={TORCH_COLOUR}
+          transparent
+          opacity={0.13}
+          blending={AdditiveBlending}
+          depthWrite={false}
           toneMapped={false}
         />
       </instancedMesh>

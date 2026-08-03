@@ -198,9 +198,10 @@ Every sprint ends with a **testable build**. Sprints from 0.2 onward are verifie
 
 **Sprint 3.1 — Darkness & lighting**
 - Dark ambient baseline, animated torch flicker, exponential fog, optional player-held light.
-- **Light budget manager** (N nearest lights active, the rest emissive-only) — the key perf system.
+- **Light budget manager** (N nearest lights active, the rest emissive-only) — the key perf system. Sprint 2.1 laid the groundwork in `src/systems/lightPool.ts`: nearest-N with hysteresis, and a rate-limited hand-over so a light only ever moves while it is dark. This sprint sets N by profiling and takes over the emissive fallback.
 - Shadow strategy: one shadow-casting light maximum, tight cascades, everything else unshadowed.
-- ✅ **Test:** profile a fully populated arena on Quest 3 — sustained 72fps with the frame HUD as evidence.
+- **An in-headset frame readout.** `r3f-perf` is DOM and does not composite into an immersive session, so there is currently no way to see fps in VR — which makes this sprint's own acceptance test unrunnable. Needs a world-space readout (wrist or panel), and it must be dev-only.
+- ✅ **Test:** profile a fully populated arena on Quest 3 — sustained 72fps, read from inside the headset.
 
 **Sprint 3.2 — Spatial audio**
 - `AudioEngine`: HRTF-panned positional sources, distance/occlusion attenuation, pooled voices, a global mixer with per-bus volume in settings.
