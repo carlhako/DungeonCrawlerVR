@@ -11,7 +11,7 @@
 
 import { useEffect, useMemo, useRef } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
-import { CanvasTexture, Mesh, MeshBasicMaterial, PlaneGeometry } from 'three'
+import { CanvasTexture, DoubleSide, Mesh, MeshBasicMaterial, PlaneGeometry } from 'three'
 
 export interface HudCanvasSize {
   width: number
@@ -47,6 +47,9 @@ export function HudOverlay({
       transparent: true,
       depthTest: false,
       depthWrite: false,
+      // PlaneGeometry faces +Z but the camera looks along -Z — the quad would be
+      // backface-culled in both eyes without this.
+      side: DoubleSide,
     })
     const geo = new PlaneGeometry(sizeMetres[0], sizeMetres[1])
     return { texture: tex, material: mat, geometry: geo, canvasEl: canvas }
