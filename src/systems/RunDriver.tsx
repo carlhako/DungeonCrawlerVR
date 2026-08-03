@@ -1,10 +1,10 @@
 import { useRef } from 'react'
 import { SystemOrder } from '@/core/loop'
 import { useFixedUpdate } from '@/core/simulation'
-import { playerState, recallPlayer, PLAYER_SPAWN } from '@/systems/player'
+import { recallPlayer, PLAYER_SPAWN } from '@/systems/player'
 import { useRun, type RunPhase } from '@/systems/run'
 import { useDungeon } from '@/systems/dungeon/store'
-import { DUNGEON_MOUTH, FOYER_BOUNDS } from '@/scenes/Foyer'
+import { DUNGEON_MOUTH } from '@/scenes/Foyer'
 
 /**
  * Drives the run machine's timed transitions.
@@ -31,20 +31,7 @@ import { DUNGEON_MOUTH, FOYER_BOUNDS } from '@/scenes/Foyer'
 const LOADING_SECONDS = 0.9
 
 /** How long the end-of-wave state holds before the player is handed back to the shop. */
-const COMPLETE_SECONDS = 2.5
-
-/**
- * Far enough into the foyer to count as home.
- *
- * A cleared wave does not end where the last enemy died — the player **walks back**, the same
- * way they walked in. That is not ceremony: the level is continuous with the foyer on purpose,
- * and yanking somebody out of it the instant the fight ends is the cut to black that Sprint
- * 2.1 built the whole passage to avoid. The walk home through a level you have just emptied is
- * also the only quiet minute in a wave.
- *
- * Death is the exception, below, and the only one.
- */
-const HOME_Z = -FOYER_BOUNDS.depth / 2 + 0.4
+const COMPLETE_SECONDS = 1.2
 
 export function RunDriver() {
   const elapsed = useRef(0)
@@ -77,9 +64,11 @@ export function RunDriver() {
         break
 
       case 'waveComplete':
-        // Held until the player is actually back in the foyer. The dungeon stays standing
-        // and empty until then; `foyer` below is what puts it away.
-        if (elapsed.current >= COMPLETE_SECONDS && playerState.position.z > HOME_Z) {
+        // The player is recalled to the foyer on the first step — the wave is over, there
+        // is nothing left to walk through, and the empty dungeon is scenery rather than
+        // ceremony. The beat is a moment to see the payout land before the level goes away.
+        recallPlayer({ x: PLAYER_SPAWN[0], y: PLAYER_SPAWN[1], z: PLAYER_SPAWN[2] })
+        if (elapsed.current >= COMPLETE_SECONDS) {
           run.send('return')
         }
         break

@@ -239,9 +239,22 @@ function buzz(controllers: Controllers, preset: HapticPreset): void {
  */
 function openAt(placement: DungeonPlacement | null, x: number, z: number): boolean {
   if (!placement) return true
+  // Hard boundary at the dungeon mouth: nothing hostile may step into the vestibule or
+  // foyer. The nav grid already catches this (cells past the edge are solid), but the
+  // check here is explicit and intentional — the foyer is the safe room.
+  if (z > mouthBoundary(placement)) return false
   const cx = Math.floor((x - placement.offset.x) / CELL_SIZE + placement.map.width / 2)
   const cy = Math.floor((z - placement.offset.z) / CELL_SIZE + placement.map.height / 2)
   return isOpen(placement.nav, cx, cy)
+}
+
+/** The world Z past which a body has left the dungeon and entered the foyer passage. */
+function mouthBoundary(placement: DungeonPlacement): number {
+  // The mouth is the one floor cell on the south edge. Its outer edge in world space is
+  // where the dungeon ends and the vestibule begins.
+  const mouth = placement.map.mouth
+  const local = (mouth.y - placement.map.height / 2 + 0.5) * CELL_SIZE
+  return local + placement.offset.z + CELL_SIZE / 2
 }
 
 function cellAt(placement: DungeonPlacement, x: number, z: number) {
@@ -383,14 +396,19 @@ function stepOne(
     if (definition.phasing) {
       // The Wraith's whole identity: the walls do not apply to it. It is slow and weak in
       // exchange, and it arrives from a direction the nav grid says is impossible.
+      // But even the Wraith cannot enter the foyer — the doorway seals it out.
       enemy.position.x += intent.dx
       enemy.position.z += intent.dz
+      if (placement) enemy.position.z = Math.min(enemy.position.z, mouthBoundary(placement))
     } else {
       const moved = resolveMove(enemy.position, intent.dx, intent.dz, definition.radius, (x, z) =>
         openAt(placement, x, z),
       )
       enemy.position.x = moved.x
       enemy.position.z = moved.z
+      // Double-clamp: `resolveMove` and `openAt` together should prevent crossing the
+      // mouth boundary, but an enemy that somehow arrives past it is pulled back.
+      if (placement) enemy.position.z = Math.min(enemy.position.z, mouthBoundary(placement))
     }
   }
 

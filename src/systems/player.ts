@@ -60,11 +60,9 @@ export const playerCollider: { current: Collider | null } = { current: null }
 /**
  * A position the player is to be moved to, applied by `PlayerRig` on its next step.
  *
- * There is exactly one thing in this game allowed to use it: **death**. Everything else the
- * player does, they walk — they walk into the dungeon rather than being dropped into it, and
- * they walk home after clearing a wave, because a cut in VR is a cut to somebody wondering
- * where they went. Dying is the one case with no walk available, and leaving a corpse standing
- * in a corridor waiting to be escorted back would be worse.
+ * Used by **death** and by **wave complete**: the two cases where the player is returned to
+ * the foyer without walking. Death has no walk available; a cleared wave has nothing left to
+ * walk through, and the empty dungeon is scenery rather than ceremony.
  *
  * A pending value rather than a direct write, for the same reason the teleport arc is: the
  * character controller owns the capsule, and something else writing its translation halfway
