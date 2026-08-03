@@ -114,11 +114,23 @@ export function HudOverlay({
     // the desktop camera and the XR array camera. For a symmetric perspective projection,
     // elements[0]/[5] are the horizontal/vertical scale (cot(fov/2), and cot(fov/2)/aspect);
     // the half-extent of the frustum at depth `d` in front of the camera is d / that scale.
+    //
+    // The XR camera is not symmetric: `gl.xr.getCamera()` returns an ArrayCamera whose
+    // projection matrix is the *union* of the left/right eye frustums (three's
+    // `setProjectionFromUnion`), which is off-axis — elements[8]/[9] (the x/y skew terms)
+    // are non-zero. Ignoring that skew shifts every anchor by a few degrees, which is
+    // invisible for a centred HUD but pushes an edge anchor (top, bottom-left, ...) outside
+    // the real per-eye frustums entirely: the quad rendered, but on nothing either eye could
+    // see. `skewX`/`skewY` are that missing centre offset; they're exactly zero for the
+    // desktop camera's symmetric matrix, so this is a strict generalisation, not a special case.
     const proj = head.projectionMatrix.elements
-    const halfW = Math.abs(oz) / proj[0]
-    const halfH = Math.abs(oz) / proj[5]
-    const ox = xFrac * halfW * SAFE_FRACTION
-    const oy = yFrac * halfH * SAFE_FRACTION
+    const d = Math.abs(oz)
+    const halfW = d / proj[0]
+    const halfH = d / proj[5]
+    const skewX = (d * proj[8]) / proj[0]
+    const skewY = (d * proj[9]) / proj[5]
+    const ox = skewX + xFrac * halfW * SAFE_FRACTION
+    const oy = skewY + yFrac * halfH * SAFE_FRACTION
 
     // `offset`'s forward component follows the local -Z-is-forward convention (matching
     // the caller's comment), but `fwd` below is *already* that forward direction — so its
