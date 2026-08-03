@@ -7,8 +7,8 @@ sprint, before committing. The roadmap itself lives in [PLAN.md](PLAN.md).
 
 ## Current position
 
-> **Sprint 1.3 is built; two Quest 3 passes have each found defects in the shop and its
-> pointer, all now fixed — awaiting a third headset pass.**
+> **Sprint 1.3 is built; three Quest 3 passes have each found defects in the shop and its
+> pointer, all now fixed — awaiting a fourth headset pass.**
 >
 > Epic 1 is now complete end to end: start with 100 gold, buy and equip a weapon at a board
 > on the shop counter, open the door, clear a wave, come back richer and spend it. All of it
@@ -388,6 +388,24 @@ The teleport arc was aimed from the grip too. It read as usable because an arc b
 downwards anyway, but it was aimed several degrees below where the hand was pointing the
 whole time; it now agrees with the beam.
 
+**Headset pass 3 (2026-08-03) — the beam lagged the hand.** Reported: "when moving there are
+2 pointer lines, one lagging behind the main pointer; as soon as I stop moving the 2nd line
+merges into the main line." Also while turning, and while waving the hand about.
+
+One line, drawn a frame late. The beam wrote *world space* vertices at the aim pose read from
+`matrixWorld`, but an `XRSpace` object's matrix is written by a `useFrame` at priority -100
+and composed into `matrixWorld` during the render that follows — so the pose we read was
+always the previous frame's. Standing still that is invisible; moving, it separates from the
+controller by however far the hand travelled in 14ms, and the headset's reprojection smears
+the gap into a convincing second line.
+
+Fixed by parenting: `PointerBeam` is now a child of the controller's target ray space
+(`src/entities/XRController.tsx`) and draws a unit line down its own -Z, scaled to length.
+The pose carries it, so there is no pose to read and nothing to be late. **Anything attached
+to a tracked pose should be parented to it, not positioned from it** — the same rule the
+teleport arc breaks deliberately, because that geometry has to stay in the world while the
+player teleports out from under it.
+
 **Verified on desktop:** typecheck clean · 242/242 unit tests · production build succeeds ·
 smoke test buys and equips a weapon *through the panel* — walking to the counter, aiming at
 each button, pressing the key — including a purchase it cannot afford, then reloading the
@@ -398,7 +416,8 @@ page and finding the gold, the weapon, the loadout and the wave number all still
 1. Walk to the counter. The board reads your gold, the three weapons and what you own.
 2. **Stand back a step and point** at a weapon row, with either hand, and pull the trigger.
    There should be exactly **one** beam per hand, leaving along the line the controller looks
-   like it is aiming down — not tipped at the floor. The beam should reach the row you are
+   like it is aiming down — not tipped at the floor, and staying welded to the hand while you
+   walk, turn and wave it about. The beam should reach the row you are
    aimed at, that row alone should highlight, and aiming anywhere along it — not just at its
    centre — should work.
 3. **Reach out** and press a button with your hand instead. The button under your hand must

@@ -250,6 +250,9 @@ the next VR entry.
   so a beam drawn along it points at the player's feet. `src/entities/XRController.tsx`
   replaces the library's default controller to publish the target ray pose — and to *not*
   draw the library's own ray pointer, which was a second beam obeying a different picker.
+  The pointer beam hangs off that same space rather than being positioned from it: a tracked
+  pose read from `matrixWorld` is a frame old, and a beam a frame behind the hand reads as a
+  second beam trailing the first. Parent to a pose, don't chase it.
 - **Text is rasterised on a canvas** (`src/ui/label.ts`), not fetched as a font. SDF text
   libraries pull a default font from a CDN on first use, and a dungeon that silently loses
   all its text when the network hiccups is not a trade worth making.

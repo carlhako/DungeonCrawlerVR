@@ -2,6 +2,7 @@ import { Suspense } from 'react'
 import { XRControllerModel, XRSpace, useXRInputSourceStateContext } from '@react-three/xr'
 import type { Object3D } from 'three'
 import { setAim } from '@/systems/xrAim'
+import { PointerBeam } from '@/ui/PointerBeam'
 
 /**
  * What a controller is in this game: a model, and a published aim pose. No pointers.
@@ -31,7 +32,13 @@ export function GameXRController() {
         ref={(object: Object3D | null) => {
           setAim(handedness, object)
         }}
-      />
+      >
+        {/* Parented, not positioned: the beam rides the tracked pose exactly, with no frame
+            of lag between the line and the hand it comes out of. */}
+        {(handedness === 'left' || handedness === 'right') && (
+          <PointerBeam handedness={handedness} />
+        )}
+      </XRSpace>
     </>
   )
 }
