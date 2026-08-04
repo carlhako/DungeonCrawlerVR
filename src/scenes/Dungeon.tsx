@@ -245,8 +245,11 @@ function Colliders({ placement, strips }: { placement: DungeonPlacement; strips:
       {/* Floor and ceiling as two slabs across the whole grid, in their own rigid body so
           the wall strip can carry its own user data (see below). Solid rock is unreachable
           anyway, so there is nothing to be gained by cutting them to shape — and a
-          zero-thickness floor is something a fast body ends up on the wrong side of. */}
-      <RigidBody type="fixed" colliders={false}>
+          zero-thickness floor is something a fast body ends up on the wrong side of.
+          `grippable: true` here too — real Gorilla Tag locomotion propels off *any* surface
+          a hand touches, floor included; the gorilla module tells floor-push apart from
+          wall-climb by the hit normal, not by which body it came from. */}
+      <RigidBody type="fixed" colliders={false} userData={{ grippable: true }}>
         <CuboidCollider args={[half.x, 0.5, half.z]} position={[middle.x, -0.5, middle.z]} />
         <CuboidCollider
           args={[half.x, 0.5, half.z]}
@@ -255,11 +258,11 @@ function Colliders({ placement, strips }: { placement: DungeonPlacement; strips:
       </RigidBody>
 
       {/* All wall strips share one rigid body, so a single `userData.grippable` flag covers
-          every climbable surface in the dungeon. Future hazards (lava, magical barriers)
+          every touchable surface in the dungeon. Future hazards (lava, magical barriers)
           live in their own rigid body with `grippable: false` — the gorilla module reads the
           flag from `collider.parent()` and refuses a grip on anything that does not carry
           it. Splitting walls out from the floor costs Rapier one extra body, which is the
-          price of being able to mark a *class* of colliders climbable rather than each one
+          price of being able to mark a *class* of colliders touchable rather than each one
           individually. */}
       <RigidBody type="fixed" colliders={false} userData={{ grippable: true }}>
         {strips.map((strip) => {

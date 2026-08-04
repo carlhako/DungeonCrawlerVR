@@ -53,12 +53,21 @@ export const TRANSFER_FACTOR = 1
  *  rests their arms. */
 const STICK_DEADZONE = 0.15
 
+/** Below this vertical component, a hit normal counts as a wall rather than a floor or
+ *  ceiling. 0.7 is roughly 45 degrees — steeper than any dungeon surface actually is, so
+ *  the split is really "flat" vs "upright", not a fine-grained slope cutoff. */
+const WALL_NORMAL_MAX_UP = 0.7
+
 type LocomotionState = 'floor' | 'wall' | 'air'
 
 interface PerHandState {
   previousPosition: Vec3
   currentPosition: Vec3
   isGripping: boolean
+  /** True when the touched surface is (close to) vertical — a climbable wall rather than
+   *  the floor or ceiling. Distinguishes "push off the floor to walk" from "grab the wall
+   *  to climb" without needing a second rigid body per surface type. */
+  onWall: boolean
   /** Unit vector pointing out of the surface the hand is touching. */
   gripNormal: Vec3
   /** World-space contact point: where the hand's raycast hit the surface. */
@@ -90,6 +99,7 @@ function emptyHand(): PerHandState {
     previousPosition: { x: 0, y: 0, z: 0 },
     currentPosition: { x: 0, y: 0, z: 0 },
     isGripping: false,
+    onWall: false,
     gripNormal: { x: 0, y: 0, z: 0 },
     gripContactPoint: { x: 0, y: 0, z: 0 },
     gripCollider: null,
@@ -215,18 +225,20 @@ function stepGorilla(world: World, moveSpeed: number, scratch: StepScratch): voi
  * One short raycast per hand. Hits a collider whose parent rigid body has
  * `userData.grippable === true` → grip established.
  *
- * The player's own capsule is excluded so a hand raycast that happens to start inside
- * the body does not establish a phantom grip on the player.
+ * No button involved — real Gorilla Tag locomotion is pure hand-contact physics, not a
+ * held button, so a hand only has to be touching a surface for it to count. The player's
+ * own capsule is excluded so a hand raycast that happens to start inside the body does not
+ * establish a phantom grip on the player.
  */
 function detectGrip(world: World, scratch: StepScratch): void {
   for (const handedness of ['left', 'right'] as const) {
     const hand = handedness === 'left' ? runtime.leftHand : runtime.rightHand
     hand.isGripping = false
+    hand.onWall = false
     hand.gripCollider = null
 
     const aim = handedness === 'left' ? xrHands.left : xrHands.right
     if (!aim) continue
-    if (!xrInput[handedness].grip.pressed) continue
 
     aim.getWorldPosition(scratch.origin)
     aim.getWorldQuaternion(scratch.rotation)
@@ -245,13 +257,14 @@ function detectGrip(world: World, scratch: StepScratch): void {
     )
     if (!hit) continue
 
-    // The flag lives on the parent rigid body, not the collider — see Dungeon.tsx. Walls
-    // share one rigid body marked `grippable: true`; floor and ceiling share another that
-    // does not carry the flag, so they cannot be gripped by accident.
+    // The flag lives on the parent rigid body, not the collider — see Dungeon.tsx. Both the
+    // wall body and the floor/ceiling body carry it now; everything solid in the dungeon is
+    // touchable, and it's the normal below that tells floor-push apart from wall-climb.
     const userData = hit.collider.parent()?.userData as { grippable?: boolean } | undefined
     if (userData?.grippable !== true) continue
 
     hand.isGripping = true
+    hand.onWall = Math.abs(hit.normal.y) < WALL_NORMAL_MAX_UP
     hand.gripCollider = hit.collider
     hand.gripNormal = { x: hit.normal.x, y: hit.normal.y, z: hit.normal.z }
     hand.gripContactPoint = {
@@ -312,20 +325,25 @@ const _scratchVec = new Vector3()
 /**
  * State transitions. Designed around the rules:
  *
- *   floor → wall  when both hands grip the same collider
+ *   floor → wall  when both hands grip the same collider, wall-side (not floor or ceiling)
  *   floor → air   when ground is lost
- *   wall  → air   when both hands release (release one hand keeps `wall` — the body
+ *   wall  → air   when both wall-grips release (releasing one hand keeps `wall` — the body
  *                 hangs from the remaining hand)
  *   air   → wall  when any hand grips a wall mid-fall
  *   air   → floor when ground is regained
  *   wall  → floor is not a direct transition: releasing both hands drops to `air`, and
  *                 `air` immediately re-grounds if the floor was never really lost.
+ *
+ * Floor contact (hand touching the ground or ceiling) never promotes to `wall` — it drives
+ * push-off motion in `emitMotion` instead, exactly like a wall grip does while climbing.
  */
 function advanceStateMachine(): void {
-  const both = runtime.leftHand.isGripping && runtime.rightHand.isGripping
-  const either = runtime.leftHand.isGripping || runtime.rightHand.isGripping
+  const leftWall = runtime.leftHand.isGripping && runtime.leftHand.onWall
+  const rightWall = runtime.rightHand.isGripping && runtime.rightHand.onWall
+  const bothWall = leftWall && rightWall
+  const eitherWall = leftWall || rightWall
   const sameSurface =
-    both && runtime.leftHand.gripCollider === runtime.rightHand.gripCollider
+    bothWall && runtime.leftHand.gripCollider === runtime.rightHand.gripCollider
   const grounded = playerState.grounded
 
   switch (runtime.state) {
@@ -337,7 +355,7 @@ function advanceStateMachine(): void {
       }
       break
     case 'wall':
-      if (!either) {
+      if (!eitherWall) {
         runtime.state = 'air'
         runtime.bodyPositionOverride = null
         runtime.wallNormal = null
@@ -346,7 +364,7 @@ function advanceStateMachine(): void {
     case 'air':
       if (grounded) {
         runtime.state = 'floor'
-      } else if (either) {
+      } else if (eitherWall) {
         runtime.state = 'wall'
       }
       break
@@ -369,11 +387,17 @@ function emitMotion(moveSpeed: number): void {
   }
 
   if (runtime.state === 'floor') {
+    // Arm-swinging on the floor is pure hand-contact, no button — a hand touching the
+    // ground or ceiling (`isGripping`, regardless of `onWall`) while it moves pushes the
+    // body the other way, same as real Gorilla Tag locomotion. A hand touching a wall
+    // contributes too: the state machine only promotes to `wall` once *both* hands are on
+    // the same wall-side collider, so a single hand brushing a wall while the other still
+    // pushes off the floor should keep walking, not do nothing.
     const either = runtime.leftHand.isGripping || runtime.rightHand.isGripping
     if (either) {
-      // Both hands always contribute when they're gripping — even if one of them just
-      // started this frame. `gorillaHandContribution` returns zero for an uninitialised
-      // hand (current === previous), so a hand that just started gripping contributes
+      // Both hands always contribute when they're touching something — even if one of them
+      // just started this frame. `gorillaHandContribution` returns zero for an uninitialised
+      // hand (current === previous), so a hand that just started touching contributes
       // nothing on the first frame, by construction.
       const left = gorillaHandContribution(
         runtime.leftHand.previousPosition,
@@ -419,9 +443,10 @@ function emitMotion(moveSpeed: number): void {
  * not blow up. With one hand, that hand's normal unchanged.
  */
 function bodyWallNormal(): Vec3 {
-  const both = runtime.leftHand.isGripping && runtime.rightHand.isGripping
-  if (!both) {
-    const hand = runtime.leftHand.isGripping ? runtime.leftHand : runtime.rightHand
+  const leftWall = runtime.leftHand.isGripping && runtime.leftHand.onWall
+  const rightWall = runtime.rightHand.isGripping && runtime.rightHand.onWall
+  if (!(leftWall && rightWall)) {
+    const hand = leftWall ? runtime.leftHand : runtime.rightHand
     return hand.gripNormal
   }
   const n: Vec3 = {
@@ -441,10 +466,12 @@ function bodyWallNormal(): Vec3 {
  * the only thing keeping the player aloft.
  */
 function bodyOverrideFromHands(): Vec3 {
-  const both = runtime.leftHand.isGripping && runtime.rightHand.isGripping
+  const leftWall = runtime.leftHand.isGripping && runtime.leftHand.onWall
+  const rightWall = runtime.rightHand.isGripping && runtime.rightHand.onWall
+  const both = leftWall && rightWall
   const n = bodyWallNormal()
   if (!both) {
-    const hand = runtime.leftHand.isGripping ? runtime.leftHand : runtime.rightHand
+    const hand = leftWall ? runtime.leftHand : runtime.rightHand
     return {
       x: hand.currentPosition.x + n.x * BODY_OFFSET,
       y: hand.currentPosition.y + n.y * BODY_OFFSET,
