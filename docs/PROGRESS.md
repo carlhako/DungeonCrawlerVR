@@ -11,8 +11,11 @@ sprint, before committing. The roadmap itself lives in [PLAN.md](PLAN.md).
 > enemies, AI and the wave loop — is written and green on the desktop, and is waiting on a
 > Quest 3 pass. Sprint 2.4 — stealth & enemy awareness — is also desktop-green and awaiting
 > its Quest 3 pass. Sprint 2.5 — HUD overlays: enemy counter and explored-area map — is
-> desktop-green and awaiting its Quest 3 pass: both HUDs render correctly, the enemy counter
-> top-centre and the minimap bottom-left. Sprint 2.6 — hit feedback & VFX — is also
+> signed off on the Quest 3: both HUDs were invisible in the headset on the first pass (the
+> XR camera's projection matrix is asymmetric and the placement math assumed it wasn't), and
+> once visible they were pinned to the top edge and a bottom corner, past where a headset's
+> FOV reaches without turning the head. Both are now a hold-to-show popup near screen centre,
+> summoned by holding a face button on either controller. Sprint 2.6 — hit feedback & VFX — is also
 > desktop-green and awaiting its Quest 3 pass: bolts leave a muzzle flash and a trail, hits
 > throw sparks, kills come apart in ash and dissolve, and the camera never moves in VR.
 > Sprint 2.7 — enemy models & textures — was added after 2.6, and is next: everything an
@@ -60,7 +63,7 @@ sprint, before committing. The roadmap itself lives in [PLAN.md](PLAN.md).
 | | 2.2 Weapon & attack framework | ✅ Verified on Quest 3 |
 | | 2.3 Enemies, AI & wave loop | 🟡 Desktop green — Quest 3 pass outstanding |
 | | 2.4 Stealth & enemy awareness | ✅ Desktop green — Quest 3 pass outstanding |
-| | 2.5 HUD overlays: enemy counter & map | ✅ Desktop green — Quest 3 pass outstanding |
+| | 2.5 HUD overlays: enemy counter & map | ✅ Verified on Quest 3 |
 | | 2.6 Hit feedback & VFX | ✅ Desktop green — Quest 3 pass outstanding |
 | | 2.7 Enemy models & textures | ⬜ Next — needs the Quaternius pack in `public/models/` |
 | **3 — Fear & Atmosphere** | 3.1 Darkness & lighting | ⬜ |
@@ -1026,6 +1029,10 @@ Decisions made during the sprint:
 **Verified on desktop:** typecheck clean · 628/628 unit tests · production build succeeds ·
 both HUDs render in a live wave, correctly positioned.
 
+**Verified on the Quest 3**, after two rounds of headset-only fixes below: typecheck clean ·
+666/666 unit tests · both HUDs invisible until a face button is held, then appear near
+centre without needing to look up or into the periphery.
+
 Delivered:
 
 - `src/systems/dungeon/explored.ts` — cell-level fog of war: which dungeon cells the player
@@ -1083,9 +1090,10 @@ Known gaps:
   diegetic HUD in Sprint 4.4.
 - The enemy counter has no animation — the number ticks immediately. A brief flash or
   count-up is a feel polish item for Sprint 2.6 or later.
-- The HUD quads have no visibility toggle or opacity setting. A player who wants them off
-  entirely (immersion preference) needs a setting — the settings board already has a row
-  budget, so this is straightforward to add when asked.
+- In VR both HUDs are now hold-to-show (see the headset pass below) rather than always on,
+  which covers most of the immersion-preference case. Desktop still has no visibility toggle
+  or opacity setting — the settings board already has a row budget, so straightforward to add
+  when asked.
 - Noise pulses (Sprint 2.4) and the explored driver share the same fixed step but don't
   interact — they don't need to. The explored set is purely a map concern.
 
@@ -1104,6 +1112,30 @@ Fixed after the first desktop pass:
   signed fractions of the visible frustum at that depth, derived from the camera's projection
   matrix each frame (works for both the desktop camera and the XR array camera), pulled in by
   a `SAFE_FRACTION` so a quad's own size never clips the edge it's anchored to.
+
+**Headset pass (2026-08-04) — two defects, both fixed.** Reported: "the enemy counter and
+minimap does not display on the VR headset when out in the dungeon. its just not on the
+screen."
+
+- **`gl.xr.getCamera()` returns an off-axis camera, and the placement math assumed a
+  symmetric one.** In VR, `HudOverlay` reads the head from the XR `ArrayCamera`, whose
+  projection matrix is the *union* of the left/right eye frustums (three's
+  `setProjectionFromUnion`) and carries real skew — `elements[8]`/`[9]` are non-zero. The
+  anchor math derived a half-width/height from `elements[0]`/`[5]` alone, which is exactly
+  right for the desktop camera's symmetric matrix and silently wrong for the headset's: every
+  anchor landed a few degrees off from where it should, and an edge anchor (top, bottom-left)
+  landed outside the real per-eye frustums entirely — rendered, but on nothing either eye
+  could see. Desktop testing could not have caught this; the desktop camera has no skew to
+  get wrong. Fixed by folding the skew term into the anchor offset, which reduces to the old
+  formula exactly when skew is zero.
+- **Edge anchors don't survive contact with a headset's FOV.** Even correctly placed, "top
+  centre" and "bottom-left" sat past what the Quest 3's field of view reaches without turning
+  the head — you cannot look up at a HUD quad that tracks your look direction. Both HUDs moved
+  to just above/below screen centre and became a hold-to-show popup: hidden by default in VR,
+  shown while holding A/X or B/Y on either controller (`sideButtonHeld()` in `xrInput.ts`,
+  `HudOverlay`'s new `requireSideButton` prop), gone the instant it's released. Desktop is
+  unaffected — no controller to hold, so the overlay stays on as it always did, just
+  recentred.
 
 ### ✅ Sprint 2.6 — Hit feedback & VFX
 
