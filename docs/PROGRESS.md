@@ -18,10 +18,13 @@ sprint, before committing. The roadmap itself lives in [PLAN.md](PLAN.md).
 > summoned by holding a face button on either controller. Sprint 2.6 — hit feedback & VFX — is also
 > desktop-green and awaiting its Quest 3 pass: bolts leave a muzzle flash and a trail, hits
 > throw sparks, kills come apart in ash and dissolve, and the camera never moves in VR.
-> Sprint 2.7 — enemy models & textures — was added after 2.6, and is next: everything an
-> enemy *does* is right and it still looks like three capsules. It needs the Quaternius CC0
-> pack dropped into `public/models/` before it can finish, and four Quest 3 passes are
-> outstanding behind it.**
+> Sprint 2.7 — enemy models & textures — is **built and desktop-green, and waiting on the
+> art**. Everything that turns a GLB into an enemy is in and tested: the loader, the clip
+> mapping, the material contract, and `EnemyShape` as the seam Sprint 2.3 promised. What is not
+> in is the pack itself — `public/models/` is empty by design, Carl downloads it (its README
+> says exactly what and where), and until he does, every enemy is still the capsule it has been
+> since 2.3. That is not a broken state: a missing model is a resolved answer, not an error.
+> Four Quest 3 passes are outstanding behind it.**
 >
 > **There is something in the dungeon now.** Open the door, walk down the passage into the
 > generated level, and a wave composed from the wave number comes looking for you: Goblin
@@ -65,7 +68,7 @@ sprint, before committing. The roadmap itself lives in [PLAN.md](PLAN.md).
 | | 2.4 Stealth & enemy awareness | ✅ Desktop green — Quest 3 pass outstanding |
 | | 2.5 HUD overlays: enemy counter & map | ✅ Verified on Quest 3 |
 | | 2.6 Hit feedback & VFX | ✅ Desktop green — Quest 3 pass outstanding |
-| | 2.7 Enemy models & textures | ⬜ Next — needs the Quaternius pack in `public/models/` |
+| | 2.7 Enemy models & textures | 🟡 Built & desktop-green — needs the Quaternius pack in `public/models/` |
 | **3 — Fear & Atmosphere** | 3.1 Darkness & lighting | ⬜ |
 | | 3.2 Spatial audio | ⬜ |
 | | 3.3 Horror direction | ⬜ |
@@ -1269,6 +1272,123 @@ Known scaffolding, and the gaps:
 - The enemy counter still ticks without animation, noted as a 2.6 polish item in 2.5's log.
   Left alone deliberately: the HUD is not where this sprint's feedback belongs, and a counter
   that animates competes with the burst that caused it.
+
+### 🟡 Sprint 2.7 — Enemy models & textures
+
+**Verified on desktop:** typecheck clean · 716/716 unit tests · production build succeeds ·
+smoke test plays the whole loop and now also reports what became of every model file, asserting
+that each one *settled* — loaded or gave up — rather than leaving a fetch hanging.
+
+**The art is not here, and that is the state the sprint was designed to ship in.**
+`public/models/` contains a README and nothing else. Carl downloads the Quaternius CC0 pack into
+it — three files, named in that README — and every enemy becomes a creature with no other change
+anywhere. Until then they are the capsules they have been since 2.3. A missing GLB is a resolved
+answer, not an error: no exception, no retry loop, no red console, and a wave that plays exactly
+as it did yesterday.
+
+**Not yet verified on the Quest 3**, and it cannot be until the pack lands. The checklist is
+README item 19, and its acceptance test is one question a monitor cannot answer: from across a
+dark room, can you still tell a Skulker from a Warrior from a Wraith, and a wind-up from a walk,
+in time to step out of it.
+
+Delivered — the rules, pure and unit-tested, none of them importing three.js:
+
+- `src/systems/enemies/appearance.ts` — how an enemy *reads*, resolved from what it is doing:
+  dissolve, presence, the lean, the sink, the tint, the eyes, the halo. 17 tests.
+- `src/systems/enemies/animation.ts` — AI phase to clip name with a fallback chain and tolerant
+  matching, loop versus clamp, and the timescale that fits a clip to a phase's window. 26 tests.
+
+And the wiring:
+
+- `src/systems/enemies/models.ts` — one fetch per file at startup, parsed once, cloned per pool
+  slot. 7 tests, all of them about the file *not* being there, because that is the state this
+  repository is actually in.
+- `src/entities/EnemyShape.tsx` — the seam. Primitives and model clones behind one component,
+  one `AnimationMixer` per slot, the dissolve injected into every imported material.
+- `src/entities/enemyMaterials.ts` — the dissolve injection, lifted out of `Enemies.tsx` so the
+  primitive path and the model path cannot use two different copies of it.
+- `src/data/enemies.ts` — an `EnemyModelSpec` per enemy: file, measured height, clip candidates.
+- `src/core/debug.ts` — `__DCVR__.models`, and `scripts/makeModelFixture.mjs`.
+
+Decisions made during the sprint:
+
+- **`EnemyShape` did not exist.** Sprint 2.3 wrote down that swapping in a kit would be "a change
+  to `EnemyShape` alone" and then inlined the primitives in `Enemies.tsx`; this sprint was the
+  test of that claim and the claim was aspirational. It is real now: `Enemies.tsx` owns *where an
+  enemy is standing* and nothing else. Worth recording as a pattern — a seam that is only named
+  in a comment is not a seam, and the sprint that relies on it pays for building it.
+- **How an enemy reads is decided once, in a pure function, and both bodies consume it.** PLAN.md
+  named the material contract as the most likely thing here to break silently, and it was right
+  about the shape of the risk while understating it: the failure is not just a flash that misses
+  an imported material, it is *two* renderers drifting apart over a year. `resolveAppearance`
+  means there is one answer to "how bright is a telegraph", and a path that stopped calling it is
+  a path that is visibly wrong rather than subtly wrong.
+- **The lean, the bob and the halo are applied above the swap.** So they are on for the model
+  too, always, and a kit with no stagger clip still visibly flinches. This is what makes "the
+  readability rules survive the swap or the swap is a regression" enforceable rather than a hope:
+  the procedural channel is not a fallback that gets switched off when a model arrives, it is the
+  floor underneath whatever the model does.
+- **A window is fitted to the clip, not hoped for.** A wind-up is stretched or compressed to the
+  definition's `telegraph` exactly, so the model is furthest back at the instant the AI commits.
+  A kit whose attack animation happens to run 1.2s would otherwise still be rearing back after
+  the blow had landed — which is not a cosmetic mismatch, it is the game lying about the one
+  number the player's survival depends on.
+- **Clip names are matched tolerantly, in tiers.** `Attack`, `attack` and
+  `CharacterArmature|Sword_Attack` are one clip as far as this game is concerned. Nobody here
+  chose the names inside a CC0 kit and a re-export can change them, so the table lists
+  *candidates*. Exact matches across every candidate are tried before any fuzzy one, or a loose
+  substring hit on a first preference beats an exact hit on a second.
+- **The model keeps its own albedo; the state speaks through emissive.** Painting the
+  definition's flat colour over the kit's textures would make three creatures out of one. The
+  flash, the burn tint and the chill tint already used emissive on the capsule, so they transfer
+  unchanged — and the wind-up gets an emissive boost because a model has no eyes this game can
+  address, which is a channel the capsule had and would otherwise have been lost.
+- **Every type is cloned into every slot at load time.** Ten slots × three types, all hidden but
+  one. The alternative — clone when a type first occupies a slot — is a `SkeletonUtils.clone`
+  plus a material compile at the moment a skeleton comes round a corner, which is the exact hitch
+  the pool discipline exists to prevent. Geometry and textures are shared between clones, so a
+  spare clone costs a skeleton and an invisible object.
+- **`SkeletonUtils.clone`, not `Object3D.clone`.** The plain clone leaves a skinned mesh's bones
+  pointing at the original's skeleton, so ten enemies share one pose and move as a single animal.
+- **Materials are cloned per slot.** They are shared by the clone, and every write here is
+  per-enemy: one skeleton taking a hit would otherwise flash the whole wave white.
+- **The AI never waits on an animation.** Playback is visual and runs on the render frame. The
+  moment a decision depends on a clip event, the game's timing becomes a property of an art asset
+  somebody else exported.
+- **A missing file is `console.info`, not a warning.** Before the pack lands this is the expected
+  state of the world, and a console full of red every session trains everyone to ignore it.
+
+Found while verifying, and worth recording:
+
+- **A wrong filename arrives as a successful fetch.** The dev server — and most static hosts —
+  answer an unknown path with the SPA's `index.html` and a **200**, so `response.ok` was true and
+  the failure surfaced from deep inside the glTF parser as `Unexpected token '<'`. Checking the
+  GLB magic number turns that into a sentence naming the actual mistake. This will be the most
+  common thing to go wrong when the pack lands, and it is the one that looked least like itself.
+- **The model path had nothing to exercise it**, which is a poor way to hand two hundred lines to
+  a headset. `scripts/makeModelFixture.mjs` writes a two-bone skinned box carrying the four clips
+  a Quaternius character ships with, and running the smoke test against three copies of it proved
+  the whole chain — fetch, clone, skeleton, mixer, clip plan, material injection — with the wave
+  screenshot showing a body leaning into its hit flash where a capsule used to be. The fixture is
+  not art and is not a fallback; `public/models/*.glb` is gitignored, so using it leaves nothing
+  behind.
+
+Known scaffolding, and the gaps:
+
+- **No texture compression pass.** PLAN.md asks for KTX2/Basis if the raw PNGs blow the budget,
+  and "the budget" is a measurement that has to happen on a Quest 3 with a full wave standing.
+  Nothing to compress until there is something to measure, so this is explicitly the first thing
+  to do after the headset pass if the frame time moved.
+- **`three-mesh-bvh` is still unused**, and the answer is still no. A swept segment against one
+  sphere is cheaper than a BVH query, and a generous hit volume is a better game than an exact
+  one. Revisit only if a silhouette makes the sphere read as wrong.
+- **Skinned meshes keep frustum culling on**, with three's bounding sphere computed from the bind
+  pose. A wildly-reaching animation could in principle be culled early at a screen edge. Cheaper
+  to look for it in the headset than to pay for `frustumCulled = false` on every enemy up front.
+- **The foyer, the dungeon and the weapons are still primitives.** Enemies came first because
+  they are the thing the player looks at hardest and the only thing that moves. Everything built
+  here — the loader, the cache, the material injection — is enemy-shaped for now; generalising it
+  is a decision for whoever decides the walls need a kit too.
 
 ## How to pick this up in a new session
 

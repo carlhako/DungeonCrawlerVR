@@ -14,6 +14,7 @@ import type { WeaponId } from '@/data/weapons'
 import { combatSnapshot } from '@/systems/combat/state'
 import { applyDamage, damageables, publishDamage } from '@/systems/combat/targets'
 import { enemyPool, enemySnapshot } from '@/systems/enemies/state'
+import { enemyModelSnapshot } from '@/systems/enemies/models'
 import { fxSnapshot } from '@/systems/fx/state'
 import { playerVitals } from '@/systems/vitals'
 
@@ -170,6 +171,17 @@ export interface DebugHandle {
    */
   readonly fx: ReturnType<typeof fxSnapshot>
   /**
+   * What the enemy models did, per file: loaded, missing, and with which clips in them.
+   *
+   * Sprint 2.7's art lands as files Carl drops into `public/models/`, and every failure mode
+   * here is *silent by design* — a missing GLB falls back to the primitive body, which is
+   * exactly what the game looked like yesterday. So "the pack is in the wrong folder", "the
+   * file is named differently" and "it loaded fine, the kit just calls its walk something
+   * else" are three completely different problems that all look identical on screen. This is
+   * where they are told apart, and it is the first thing to read when a model does not appear.
+   */
+  readonly models: ReturnType<typeof enemyModelSnapshot>
+  /**
    * Kill everything currently standing, through the real damage path.
    *
    * Scaffolding for the smoke test, and narrowly scoped on purpose: it does not clear the
@@ -306,6 +318,9 @@ export function installDebugHandle(): void {
     },
     get fx() {
       return fxSnapshot()
+    },
+    get models() {
+      return enemyModelSnapshot()
     },
     slay: () => {
       let killed = 0

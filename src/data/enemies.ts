@@ -26,8 +26,41 @@
 
 import type { Element } from '@/data/elements'
 import type { Resistances } from '@/systems/combat/damage'
+import type { ClipMapping } from '@/systems/enemies/animation'
 
 export type EnemyId = 'goblin-skulker' | 'skeleton-warrior' | 'wraith'
+
+/**
+ * Where an enemy's model comes from, and what to do with it when it arrives.
+ *
+ * Sprint 2.7. The files themselves are a **CC0 Quaternius pack that Carl downloads** into
+ * `public/models/` — see the README there for exactly what to fetch and what to name it.
+ * Everything in this table is written so the game works before those files exist and works
+ * better the moment they do: a missing GLB is not an error, it is a slot that keeps drawing
+ * the primitive it has drawn since Sprint 2.3.
+ *
+ * The clip names are *candidates*, not requirements. Nobody here chose the names inside a CC0
+ * kit, and `matchClip` will take `Attack`, `attack` or `CharacterArmature|Sword_Attack` for the
+ * same thing — so the lists below are a description of what to look for rather than a contract
+ * that a re-export can break.
+ */
+export interface EnemyModelSpec {
+  /** Served from `public/`, so `/models/x.glb` is `public/models/x.glb`. */
+  url: string
+  /**
+   * The model's own height, floor to top of head, in metres.
+   *
+   * Measured once when the pack lands, not trusted from the exporter. `modelScale` corrects it
+   * to the definition's `height`, which is what every readability decision was tuned against.
+   */
+  sourceHeight: number
+  /** Extra yaw in radians, for a kit whose models face +Z rather than the game's -Z. */
+  yawOffset?: number
+  /** Vertical nudge in metres, for a kit whose origin is not on the floor. */
+  yOffset?: number
+  /** Clip names to look for, per AI phase, best first. */
+  clips: ClipMapping
+}
 
 export interface EnemyDefinition {
   id: EnemyId
@@ -122,6 +155,13 @@ export interface EnemyDefinition {
    * failing to tell the player anything. The eyes carry most of this; see `Enemies.tsx`.
    */
   glow: number
+
+  /**
+   * The model, if there is one. Absent — or its file missing — means primitives.
+   *
+   * Presentation only. Nothing about hit spheres, nav or AI reads this: a model is drawing.
+   */
+  model?: EnemyModelSpec
 }
 
 export const ENEMIES: Record<EnemyId, EnemyDefinition> = {
@@ -150,6 +190,20 @@ export const ENEMIES: Record<EnemyId, EnemyDefinition> = {
     minWave: 1,
     colour: '#6f8a4a',
     glow: 0.35,
+    model: {
+      url: '/models/goblin-skulker.glb',
+      sourceHeight: 1.2,
+      clips: {
+        idle: ['Idle'],
+        // It is the fast one, and it should look it even standing still between lunges.
+        chase: ['Running', 'Run', 'Walk'],
+        telegraph: ['Attack', 'Punch', 'Bite'],
+        strike: ['Attack', 'Punch', 'Bite'],
+        recover: ['Idle'],
+        stagger: ['HitRecieve', 'HitReceive', 'Hit', 'Damage'],
+        dying: ['Death', 'Die'],
+      },
+    },
   },
   'skeleton-warrior': {
     id: 'skeleton-warrior',
@@ -178,6 +232,23 @@ export const ENEMIES: Record<EnemyId, EnemyDefinition> = {
     minWave: 1,
     colour: '#d8d2c0',
     glow: 0.25,
+    model: {
+      url: '/models/skeleton-warrior.glb',
+      sourceHeight: 1.85,
+      clips: {
+        idle: ['Idle'],
+        // Slow and heavy. A walk, never a run — the whole lesson of this enemy is that you can
+        // step back out of its swing, and a sprinting skeleton says the opposite.
+        chase: ['Walk', 'Walking'],
+        // Separate wind-up and strike where the kit has them, because this is the enemy whose
+        // telegraph the player is being taught to read.
+        telegraph: ['Attack_Windup', 'Windup', 'Attack'],
+        strike: ['Attack', 'Sword_Attack', 'Slash'],
+        recover: ['Idle'],
+        stagger: ['HitRecieve', 'HitReceive', 'Hit', 'Damage'],
+        dying: ['Death', 'Die'],
+      },
+    },
   },
   wraith: {
     id: 'wraith',
@@ -205,6 +276,22 @@ export const ENEMIES: Record<EnemyId, EnemyDefinition> = {
     minWave: 3,
     colour: '#7fa8c8',
     glow: 1.1,
+    model: {
+      url: '/models/wraith.glb',
+      sourceHeight: 1.9,
+      // It comes through the wall, so it must not also look like it is walking on the floor.
+      // The float is what sells the one thing this enemy is for.
+      yOffset: 0.12,
+      clips: {
+        idle: ['Idle', 'Flying', 'Float'],
+        chase: ['Flying', 'Float', 'Idle'],
+        telegraph: ['Attack', 'Cast'],
+        strike: ['Attack', 'Cast'],
+        recover: ['Idle', 'Flying'],
+        stagger: ['HitRecieve', 'HitReceive', 'Hit', 'Damage'],
+        dying: ['Death', 'Die'],
+      },
+    },
   },
 }
 

@@ -9,3 +9,10 @@ dist-ssr/
 .env.*
 !.env.example
 artifacts/
+
+# The CC0 enemy pack is downloaded, not committed — see public/models/README.md. It is public
+# domain, so this is about weight and provenance rather than licensing: a few megabytes of
+# binary that nobody in this repository authored, which anyone can fetch again in a minute.
+public/models/*.glb
+public/models/*.gltf
+public/models/*.bin

@@ -349,6 +349,17 @@ await page
   .catch(() => {})
 wave.firstArrival = await readEnemies()
 
+/**
+ * What became of the enemy models — Sprint 2.7.
+ *
+ * The art is a CC0 pack Carl drops into `public/models/`, and it is deliberately not committed,
+ * so on this machine every entry is expected to read `missing`. That is the assertion worth
+ * making: the *absence* of the pack has to be a resolved, quiet state that leaves a wave of
+ * capsules walking around, not a promise that never settles and not a console full of errors.
+ * When the files do land, the same check proves they parsed and says which clips are in them.
+ */
+wave.models = await page.evaluate(() => window.__DCVR__?.models ?? null)
+
 /** Distance from the player to the nearest living enemy, or null. */
 async function nearestEnemy() {
   const [enemies, player] = await Promise.all([readEnemies(), readPlayer()])
@@ -1089,6 +1100,22 @@ if (!wav.firstArrival || wav.firstArrival.total <= 0) {
     failures.push(
       `enemies never closed the gap: ${wav.approachFrom.distance?.toFixed(1)}m -> ${wav.approachTo.distance.toFixed(1)}m`,
     )
+  }
+  // Sprint 2.7. Every model must have *settled* — loaded or given up — by the time the first
+  // enemy is walking around. An entry still saying `loading` minutes in is a fetch that hung,
+  // which on a real connection is an enemy that stays a capsule forever with nothing said.
+  if (!wav.models) {
+    failures.push('the model loader never reported anything')
+  } else {
+    for (const [id, entry] of Object.entries(wav.models)) {
+      if (entry.status !== 'ready' && entry.status !== 'missing') {
+        failures.push(`${id}'s model never settled: ${entry.status} (${entry.url})`)
+      }
+      // A model that loaded but has nothing in it is worse than none: the enemy stands there.
+      if (entry.status === 'ready' && entry.clips.length === 0) {
+        failures.push(`${id}'s model loaded with no animation clips in it (${entry.url})`)
+      }
+    }
   }
   // An enemy is a damageable like any other: same registry, same swept segment, same
   // applyDamage — and then counted and paid for by the director. Five links, any of which

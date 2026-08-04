@@ -272,7 +272,33 @@ Enter VR and confirm, in order:
       its own hit effect, say so.
     - **The frame.** A pack dying at once is the heaviest moment in the game for the particle
       pool. Watch for judder on head turns while three things come apart in front of you.
-19. **Starting over** — turn around. The "new game" plaque is on the back wall behind the
+19. **Whether they read as creatures** — Sprint 2.7, and it needs the CC0 pack in
+    `public/models/` first (see the README in that folder; three files, five minutes). Without
+    it every enemy is still the capsule and there is nothing here to check.
+    Clear a wave and answer one question: from across a dark room, can you still tell
+    a Skulker from a Warrior from a Wraith, and a wind-up from a walk, **in time to step out of
+    it**? That is the entire acceptance test. A model with a beautiful idle and an unreadable
+    wind-up is worse than the capsule was, and if that is what happened, the sprint is a
+    regression rather than an improvement — say so plainly.
+    - **The wind-up.** A Warrior committing to a swing must rear back visibly and brighten. The
+      lean is procedural and applies on top of whatever the kit animates, so it cannot be lost
+      — but a busy attack animation can *bury* it. Watch for that specifically.
+    - **The walk.** Speed follows actual movement, so a chilled enemy should visibly labour
+      rather than slide along at a normal stride.
+    - **The stagger.** Interrupt a wind-up with the Frostbrand. It has to be obvious that you
+      took the swing away from it.
+    - **Death.** It should still dissolve from a burning edge, the same as the capsule did —
+      the shader is injected into the kit's own materials. A body that blinks out instead means
+      the injection missed that material.
+    - **Size.** If a creature comes out obviously too big or too small, that is one number:
+      `sourceHeight` in `src/data/enemies.ts`. Facing backwards is `yawOffset`.
+    - **The frame, and this one decides whether it ships.** With a full wave standing in the
+      biggest room, frame time must be no worse than it was with primitives. A wave that drops
+      below 72fps because the skeletons look nice is a wave that goes back to being capsules.
+    - If an enemy stays a capsule with the files in place, read `__DCVR__.models` in the browser
+      console before anything else — it distinguishes "wrong filename" from "loaded, but the kit
+      calls its walk something else", which look identical on screen.
+20. **Starting over** — turn around. The "new game" plaque is on the back wall behind the
     spawn. One press arms it and it says so; a second wipes gold, weapons and upgrades back
     to a first launch. Leave it armed and walk away — it must stand down by itself. Then
     check the settings board: your comfort options must *not* have been wiped with it.
@@ -402,6 +428,16 @@ the next VR entry.
 - **Player state is a plain singleton** (`src/systems/player.ts`), like `xrInput`. The
   vignette reads it every frame; enemy aggro and the scare director will read it sixty times
   a second. None of that should re-render the scene graph.
+- **Art is optional at runtime, and the fallback is the previous sprint's build.** Enemy
+  models are fetched from `public/models/` at startup; a file that is not there resolves to
+  "no model" and the slot draws the primitive body it has drawn since Sprint 2.3. Nothing
+  awaits a model and nothing throws without one. That is what lets the CC0 pack be a download
+  Carl chooses to make rather than a build dependency — and it is also the honest behaviour on
+  a bad connection, where the alternative is a dungeon full of invisible enemies.
+- **How an enemy reads is decided once** (`src/systems/enemies/appearance.ts`) and applied to
+  whichever body is drawn. The lean, the walk bob and the halo are applied to groups *above*
+  the primitive/model swap, so a kit that animates a state badly — or not at all — degrades to
+  what the capsule did rather than to nothing.
 
 ## Layout
 
@@ -413,7 +449,9 @@ src/
   scenes/    foyer, dungeon, greybox
   ui/        diegetic panels, comfort vignette, VR entry, dev overlays
   data/      weapon / enemy / wave definitions
-scripts/     smoke test
+scripts/     smoke test, model fixture generator
+public/
+  models/    the CC0 enemy pack — downloaded, not committed. See its README.
 ```
 
 The smoke test does more than check that something rendered. It plays the game: it walks the
