@@ -12,19 +12,31 @@ fetching an asset pack is a deliberate decision, not something a sprint does on 
 
 ## Where to get it
 
-<https://quaternius.com/> → the **Ultimate Monsters** pack (and, if the goblin in it does not
-convince, **RPG Characters** has a better one). Download the **glTF/GLB** version, not the FBX
-or the .blend.
+**One download covers most of it:** the **Ultimate Monsters** pack — 45-ish rigged, animated
+creatures, CC0.
+
+- Poly Pizza (easiest — a single **Download GLTF** button, no account):
+  <https://poly.pizza/bundle/Ultimate-Monsters-Bundle-5oyGWAmOB6>
+- Or the source: <https://quaternius.com/packs/ultimatemonsters.html>
+
+**It has no skeleton and no goblin.** Its 45 are Ghost, Ghost Skull, Demon, Blue Demon, Orc, Orc
+Enemy, Yeti, Dragon, Wizard, Alien, and a lot of cheerful slimes. So the casting below is a
+compromise on two of the three, and the goblin is worth one extra click.
 
 ## What to call it
 
-Three files, in this folder, with these exact names:
+Three files, in this folder, with these exact names. Take whichever creature you like out of the
+pack and rename it — nothing checks what is inside.
 
-| File | Enemy | Drawn height |
-| --- | --- | --- |
-| `goblin-skulker.glb` | Goblin Skulker | 1.2 m |
-| `skeleton-warrior.glb` | Skeleton Warrior | 1.85 m |
-| `wraith.glb` | Wraith | 1.9 m |
+| File | Enemy | Drawn height | Suggested source |
+| --- | --- | --- | --- |
+| `goblin-skulker.glb` | Goblin Skulker | 1.2 m | Quaternius **Goblin**, downloaded on its own: <https://poly.pizza/m/OdCOFSmEhl> — or **Orc Enemy** from the pack |
+| `skeleton-warrior.glb` | Skeleton Warrior | 1.85 m | **Demon** or **Yeti** from the pack. There is no skeleton in it; Quaternius' standalone Skeleton (<https://poly.pizza/m/yq5ATpujSt>) is a static prop with no rig, so it will stand there |
+| `wraith.glb` | Wraith | 1.9 m | **Ghost** or **Ghost Skull** from the pack — this one is a genuinely good fit |
+
+The Skulker wants to look *fast and small* and the Warrior *slow and heavy*; that difference is
+how a player tells them apart before they can make out a silhouette, so cast for silhouette
+rather than for the name.
 
 Any one of them can be missing. A file that is not here is not an error — that enemy draws its
 capsule and everything else carries on, which is also what happens on a connection bad enough to
