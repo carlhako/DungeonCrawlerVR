@@ -66,6 +66,20 @@ export const REPATH_SECONDS = 0.6
  */
 export const LOSE_INTEREST_SECONDS = 5
 
+/**
+ * Seconds an enemy walks away from the player after giving up.
+ *
+ * Without this the give-up was just "stand still here until the safety valve fires" — fine in
+ * a back room, but at the doorway it left the pack parked on the mouth line, since the foyer
+ * also blocks line of sight. A short retreat moves a doorway give-up back into the dungeon so
+ * a later re-alert is a fresh pursuit rather than a re-take of the same patch of floor.
+ *
+ * At half speed and a Skulker's 2.5 m/s that is roughly 6 m, which clears the entry cell, the
+ * corridor's first bend, and the doorway from sight. Longer than that and the pack would
+ * visibly march away every time they lost a glimpse, which is its own unfair surprise.
+ */
+export const RETREAT_SECONDS = 5
+
 /** How hard separation pulls against the path. See `blendSteering`. */
 export const SEPARATION_WEIGHT = 0.85
 
@@ -142,7 +156,12 @@ export function enterPhase(enemy: Enemy, phase: Enemy['phase']): void {
   // Every entry into chase — from idle, from stagger, from recover — starts the clock fresh,
   // so a wind-up that happened to run out of sight doesn't hand the next chase a head start
   // on giving up.
-  if (phase === 'chase') enemy.sinceSeen = 0
+  if (phase === 'chase') {
+    enemy.sinceSeen = 0
+    // Re-alerting means the player has come back into view (or made enough noise to wake us).
+    // The retreat is over; the safety valve may fire again if we lose them again.
+    enemy.retreatDone = false
+  }
 }
 
 /**
@@ -219,6 +238,31 @@ export function stepEnemyAi(enemy: Enemy, ctx: AiContext, dt: number): AiIntent 
 
     case 'idle': {
       if (!ctx.playerAlive) return IDLE
+
+      // Walk back into the dungeon after losing interest, instead of standing still wherever
+      // we were. With nothing else to do, half-speed away from the player is enough to clear
+      // the doorway in `RETREAT_SECONDS` and leave the safety-valve re-alert starting from a
+      // fresh cell rather than from the mouth.
+      if (enemy.retreating > 0) {
+        enemy.retreating = Math.max(0, enemy.retreating - dt)
+        if (enemy.retreating === 0) enemy.retreatDone = true
+        const speed = definition.speed * 0.5
+        const apart = separation(enemy.position, definition.radius, ctx.neighbours, ctx.selfIndex)
+        const away = blendSteering({ x: -toPlayer.x, z: -toPlayer.z }, apart, SEPARATION_WEIGHT)
+        enemy.velocity.x = away.x * speed
+        enemy.velocity.z = away.z * speed
+        // Backing away, still facing the player. It has not lost interest, just lost line of
+        // sight.
+        face(enemy, toPlayer, dt)
+        return {
+          dx: away.x * speed * dt,
+          dz: away.z * speed * dt,
+          strike: false,
+          repath: false,
+          expired: false,
+        }
+      }
+
       // Three ways to be noticed:
       // 1. Already alerted — being shot, or a noise pulse from a nearby weapon.
       // 2. Line of sight within the effective aggro radius, scaled by how quietly the
@@ -227,10 +271,16 @@ export function stepEnemyAi(enemy: Enemy, ctx: AiContext, dt: number): AiIntent 
       //    seconds, not two, and it exists only so a player who camps somewhere no spawn
       //    point can see cannot stall the wave forever.
       const effectiveRadius = definition.aggroRadius * ctx.detectionScale
+      // The safety valve is for "the player has been nowhere for a long time", and it only
+      // applies to enemies that have not already given up. An enemy with `retreatDone` set has
+      // stood down at the doorway and walked back into the dungeon; re-alerting it now would
+      // chase it straight back to the mouth, where the cycle starts again. It still wakes up
+      // via line of sight, hit, or noise — the only thing it does not do is hunt on its own.
+      const safetyValve = !enemy.retreatDone && enemy.timer >= MAX_IDLE_SECONDS
       const noticed =
         enemy.alerted ||
         (ctx.visible && distance <= effectiveRadius) ||
-        enemy.timer >= MAX_IDLE_SECONDS
+        safetyValve
       if (!noticed) return IDLE
       enterPhase(enemy, 'chase')
       return { ...IDLE, repath: true }
@@ -250,6 +300,11 @@ export function stepEnemyAi(enemy: Enemy, ctx: AiContext, dt: number): AiIntent 
         if (enemy.sinceSeen >= LOSE_INTEREST_SECONDS) {
           enemy.alerted = false
           enterPhase(enemy, 'idle')
+          // Walk away from the player for a few seconds before idling. An enemy that gives up
+          // at the doorway and just stops there is one the player will meet again the moment
+          // they step back out, and after MAX_IDLE_SECONDS the safety valve re-alerts it in
+          // place — which is the pile-up at the mouth this retreat is the answer to.
+          enemy.retreating = RETREAT_SECONDS
           enemy.velocity.x = 0
           enemy.velocity.z = 0
           return IDLE

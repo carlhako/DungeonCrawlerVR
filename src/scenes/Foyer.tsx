@@ -8,6 +8,7 @@ import { TrainingDummies } from '@/entities/TrainingDummy'
 import { registerInteractable, type Interactable } from '@/systems/interaction'
 import { flicker } from '@/systems/torch'
 import { useDungeon } from '@/systems/dungeon/store'
+import { loadWallTexture, useTiledWallMaterial } from '@/systems/environment/textures'
 import { ResetPlaque } from '@/ui/ResetPlaque'
 import { SettingsBoard } from '@/ui/SettingsBoard'
 import { ShopPanel } from '@/ui/ShopPanel'
@@ -41,6 +42,10 @@ const WOOD = '#4a3722'
 export function Foyer() {
   const halfW = ROOM_WIDTH / 2
   const halfD = ROOM_DEPTH / 2
+
+  useEffect(() => {
+    loadWallTexture()
+  }, [])
 
   return (
     <group>
@@ -206,10 +211,27 @@ function Wall({
   size: [number, number]
   rotation?: number
 }) {
+  const wallMaps = useTiledWallMaterial(size[0], size[1])
+
   return (
     <mesh position={position} rotation={[0, rotation, 0]} castShadow receiveShadow>
       <boxGeometry args={[size[0], size[1], WALL_THICKNESS]} />
-      <meshStandardMaterial color={STONE} roughness={0.95} />
+      {/*
+        Keyed on whether the textures have arrived. A `meshStandardMaterial` whose `map` is
+        undefined at mount compiles its shader without `USE_MAP` — three.js caches that
+        program, and assigning a texture later leaves the GPU-side program stale (it never
+        samples the texture, regardless of `material.version`). Re-mounting the material
+        when the textures become available rebuilds the program with `USE_MAP` and friends
+        declared from the start, which is what makes the stone actually show up.
+      */}
+      <meshStandardMaterial
+        key={wallMaps ? 'textured' : 'flat'}
+        color={wallMaps ? '#ffffff' : STONE}
+        map={wallMaps?.map}
+        normalMap={wallMaps?.normalMap}
+        roughnessMap={wallMaps?.roughnessMap}
+        roughness={wallMaps ? 1 : 0.95}
+      />
     </mesh>
   )
 }

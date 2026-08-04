@@ -5,6 +5,7 @@ import { MAX_IDLE_SECONDS, QUIET_DETECTION } from '@/systems/stealth'
 import {
   LOSE_INTEREST_SECONDS,
   RANGE_HYSTERESIS,
+  RETREAT_SECONDS,
   enterPhase,
   killEnemy,
   staggerEnemy,
@@ -258,6 +259,110 @@ describe('losing interest', () => {
     expect(enemy.phase).toBe('chase')
     run(enemy, context({ visible: false }), 0.5)
     expect(enemy.phase).toBe('chase')
+  })
+
+  it('arms a retreat the moment it gives up, so a doorway pack disperses into the dungeon', () => {
+    // The give-up alone used to leave enemies standing on the mouth line, which is what the
+    // "pile up at the doorway" complaint was about. The retreat is the half of the fix that
+    // actually moves them back into the level.
+    const enemy = makeEnemy()
+    enterPhase(enemy, 'chase')
+    enemy.target.enabled = true
+    enemy.alerted = true
+    run(enemy, context({ visible: false }), LOSE_INTEREST_SECONDS + STEP * 2)
+    expect(enemy.phase).toBe('idle')
+    expect(enemy.retreating).toBeGreaterThan(0)
+  })
+
+  it('walks away from the player during the retreat, at half speed', () => {
+    // Tested directly from idle so the chase phase can't drag the enemy onto the player before
+    // the retreat starts. That is the bug the test caught the first time around: the chase
+    // closes the gap during LOSE_INTEREST_SECONDS, and by the time retreat kicks in the enemy
+    // is right next to the player and `-toPlayer` degenerates.
+    const enemy = makeEnemy('goblin-skulker', { x: 0, z: -3 })
+    enemy.target.enabled = true
+    enemy.retreating = RETREAT_SECONDS
+    enterPhase(enemy, 'idle')
+    // Player past the doorway, so -toPlayer points back into the dungeon (+z).
+    const ctx = context({ visible: false, player: { x: 0, y: 1.05, z: -10 } })
+    const before = { ...enemy.position }
+    run(enemy, ctx, RETREAT_SECONDS)
+    // Half a Skulker's speed for the full retreat: 2.5 * 0.5 * 2.5 = ~3m, well clear of the
+    // entry cell. Walking the wrong way would be position.z <= before.z.
+    expect(enemy.position.z).toBeGreaterThan(before.z)
+    expect(enemy.retreating).toBe(0)
+  })
+
+  it('faces the player while retreating, so it has not lost interest, just line of sight', () => {
+    // A creature that retreats while staring at the ceiling reads as a glitch; one that
+    // retreats while still facing the way it came reads as a decision. Both reads use the
+    // same geometry — the difference is which way the head is pointed.
+    const enemy = makeEnemy('goblin-skulker', { x: 0, z: -3 })
+    enemy.target.enabled = true
+    enemy.retreating = RETREAT_SECONDS
+    enterPhase(enemy, 'idle')
+    // Player off to +X so the enemy has to swing round to face them. headingOf(1, 0) = -π/2,
+    // so after retreating the yaw should be close to -π/2 (or equivalently +3π/2).
+    const ctx = context({ visible: false, player: { x: 10, y: 1.05, z: -3 } })
+    run(enemy, ctx, 1.0)
+    // The shortest-arc turn to -π/2 from yaw 0 is through -π/2; the enemy should now face
+    // the player (yaw within ±π/4 of -π/2) rather than the original facing.
+    const distance = Math.min(
+      Math.abs(enemy.yaw - -Math.PI / 2),
+      Math.abs(enemy.yaw - (3 * Math.PI) / 2),
+    )
+    expect(distance).toBeLessThan(Math.PI / 4)
+  })
+
+  it('returns to a normal idle once the retreat has run out', () => {
+    // After the retreat the pack is somewhere in the dungeon rather than on the mouth line.
+    // The safety-valve timer (30s) is what would eventually re-alert it from there; we are
+    // only asserting the retreat itself does not loop.
+    const enemy = makeEnemy()
+    enemy.target.enabled = true
+    enemy.retreating = RETREAT_SECONDS
+    enterPhase(enemy, 'idle')
+    const ctx = context({ visible: false })
+    run(enemy, ctx, RETREAT_SECONDS + STEP * 2)
+    expect(enemy.retreating).toBe(0)
+    expect(enemy.phase).toBe('idle')
+  })
+
+  it('does not re-alert via the safety valve after a retreat, so a doorway pack stays in the dungeon', () => {
+    // The give-up without this guard was a pack that walked 3m back, idled for 30s, then
+    // chased the player right back to the doorway and started the cycle again — from the
+    // player's perspective, "five still waiting at the doorway". The retreatDone flag turns
+    // the safety valve off for any enemy that has already stood down; the only way to wake
+    // one back up is line of sight (the player coming out of the foyer) or a noise pulse.
+    const enemy = makeEnemy()
+    enemy.target.enabled = true
+    enemy.retreating = RETREAT_SECONDS
+    enterPhase(enemy, 'idle')
+    const ctx = context({ visible: false })
+    run(enemy, ctx, RETREAT_SECONDS + STEP * 2)
+    expect(enemy.retreatDone).toBe(true)
+    // Far longer than the safety valve would normally fire.
+    run(enemy, ctx, MAX_IDLE_SECONDS * 2)
+    expect(enemy.phase).toBe('idle')
+  })
+
+  it('still re-alerts on line of sight after a retreat, so the player coming back out wakes the pack', () => {
+    // Retreated enemies are dormant, not gone. The visible / within-aggro branch of the
+    // noticed check still fires, so the player walking back out of the foyer into the
+    // dungeon wakes them up as normal.
+    const enemy = makeEnemy()
+    enemy.target.enabled = true
+    enemy.retreating = RETREAT_SECONDS
+    enterPhase(enemy, 'idle')
+    const invisible = context({ visible: false })
+    run(enemy, invisible, RETREAT_SECONDS + STEP * 2)
+    expect(enemy.retreatDone).toBe(true)
+    expect(enemy.phase).toBe('idle')
+    // Player steps back into the dungeon, well within aggro radius.
+    const visible = context({ visible: true, player: { x: 0, y: 1.05, z: -6 } })
+    run(enemy, visible, STEP * 2)
+    expect(enemy.phase).toBe('chase')
+    expect(enemy.retreatDone).toBe(false)
   })
 })
 

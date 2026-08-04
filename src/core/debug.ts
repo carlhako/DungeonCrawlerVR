@@ -15,6 +15,7 @@ import { combatSnapshot } from '@/systems/combat/state'
 import { applyDamage, damageables, publishDamage } from '@/systems/combat/targets'
 import { enemyPool, enemySnapshot } from '@/systems/enemies/state'
 import { enemyModelSnapshot } from '@/systems/enemies/models'
+import { wallTextureSnapshot } from '@/systems/environment/textures'
 import { fxSnapshot } from '@/systems/fx/state'
 import { playerVitals } from '@/systems/vitals'
 
@@ -182,6 +183,13 @@ export interface DebugHandle {
    */
   readonly models: ReturnType<typeof enemyModelSnapshot>
   /**
+   * What the wall texture did: loaded, or missing and why.
+   *
+   * Same failure mode as `models` and the same fix — drop the three files into
+   * `public/textures/`, see `public/textures/README.md`.
+   */
+  readonly textures: ReturnType<typeof wallTextureSnapshot>
+  /**
    * Kill everything currently standing, through the real damage path.
    *
    * Scaffolding for the smoke test, and narrowly scoped on purpose: it does not clear the
@@ -321,6 +329,9 @@ export function installDebugHandle(): void {
     },
     get models() {
       return enemyModelSnapshot()
+    },
+    get textures() {
+      return wallTextureSnapshot()
     },
     slay: () => {
       let killed = 0

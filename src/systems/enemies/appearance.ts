@@ -36,8 +36,13 @@ export const CORPSE_SINK = 0.9
  * a texture somebody else authored. Losing a channel on the single read the player's survival
  * depends on is exactly the regression PLAN.md warns about, so the body's own glow takes it
  * over: a skeleton about to swing brightens.
+ *
+ * Kept small. At ACES tone-mapping any per-channel value much above 1.0 compresses into the
+ * same near-white output, which is the whole of what "washed out" reads as on the headset —
+ * 1.6 pushed every model into saturation at full wind. 0.3 is bright enough to read as a flare,
+ * low enough to leave the kit's textures alone.
  */
-export const MODEL_WIND_GLOW = 1.6
+export const MODEL_WIND_GLOW = 0.3
 
 /** Emissive colours for the states that override the body's own. */
 const FLASH_COLOUR = '#ffffff'
@@ -172,8 +177,14 @@ export function resolveAppearance(
   // The eyes carry the state, and they are the most informative thing on the model. The dungeon
   // is lit by six torches, and something approaching between two of them is otherwise genuinely
   // invisible — which is not tension, it is the game failing to say anything at all.
+  //
+  // Kept modest at idle — anything much above ~2 on the primitive's white-diffuse, untone-mapped
+  // eye material saturates every channel to 1 and the orange-red gets lost. Tone mapping the
+  // eye material (see `EnemyShape.tsx`) lets the colour survive higher values, but a baseline
+  // of 0.5 and a wind-up boost of 2 still reads as a flare at the top of the telegraph without
+  // bleaching the eye colour to white.
   const flicker = 0.9 + 0.1 * Math.sin(elapsed * 2 + input.seed)
-  out.eyeIntensity = (2.2 + 9 * wind) * flicker * out.presence
+  out.eyeIntensity = (0.5 + 2 * wind) * flicker * out.presence
   out.eyeOpacity = out.presence
 
   // A soft additive glow, for the same reason the torches have one: visible at any distance for

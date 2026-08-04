@@ -87,6 +87,20 @@ export interface Enemy {
   flash: number
   /** Per-enemy variation, so a pack does not bob and glow in lockstep. */
   seed: number
+  /**
+   * Seconds of retreat remaining after a give-up. While >0 the idle phase walks away from the
+   * player at half speed, so an enemy that lost interest at the doorway moves back into the
+   * dungeon instead of standing on the mouth waiting for the player to come back out.
+   */
+  retreating: number
+  /**
+   * True once the retreat has run out. While set, the safety-valve timer in idle no longer
+   * re-alerts the enemy — the safety valve exists for "the player has been nowhere for a long
+   * time", and an enemy that has already given up knows the player is in the foyer (or some
+   * other unreachable place), not lost in the dungeon. Re-alerting those would chase them
+   * straight back to the doorway on the next chase, where the cycle starts again.
+   */
+  retreatDone: boolean
 }
 
 export interface EnemyPool {
@@ -126,6 +140,8 @@ function createEnemy(slot: number): Enemy {
     counted: false,
     flash: 0,
     seed: 0,
+    retreating: 0,
+    retreatDone: false,
   }
 }
 
@@ -175,6 +191,8 @@ export function spawnEnemy(pool: EnemyPool, type: EnemyId, at: Waypoint): Enemy 
   enemy.counted = false
   enemy.flash = 0
   enemy.seed = pool.spawned
+  enemy.retreating = 0
+  enemy.retreatDone = false
 
   enemy.target.radius = definition.radius
   enemy.target.hp = definition.hp

@@ -52,6 +52,9 @@ import { injectDissolve, isTintable, type DissolveUniforms } from '@/entities/en
 /** The height the primitive body is modelled at, before it is scaled to the type in the slot. */
 const NOMINAL_HEIGHT = 1.8
 
+/** Uniform shrink applied to every kit model on top of the height correction. See `buildInstance`. */
+const MODEL_SCALE_FUDGE = 0.6
+
 /** How fast the walk bob cycles per metre per second of travel. */
 const BOB_RATE = 5
 const BOB_HEIGHT = 0.045
@@ -93,14 +96,19 @@ export function EnemyShape({ enemy }: { enemy: Enemy }) {
         roughness: 0.85,
         emissive: new Color('#ffffff'),
         emissiveIntensity: 0,
-        toneMapped: false,
+        // Tone-mapped, like the eyes below and for the same reason: an untone-mapped material
+        // saturates straight to white above channel 1.0 instead of compressing gracefully, and
+        // `applyPrimitive` writes a fresh emissive colour and intensity here every frame.
       }),
       dark: new MeshStandardMaterial({ color: '#2a2622', roughness: 0.9 }),
       eyes: new MeshStandardMaterial({
         color: '#ffffff',
         emissive: new Color('#ff5522'),
         emissiveIntensity: 2,
-        toneMapped: false,
+        // Tone-mapped, deliberately. The eye's job is to be a recognisable orange-red dot in the
+        // dark; at the old intensity (~11 at full wind-up) on an untone-mapped material every
+        // channel saturated to 1 and the colour vanished, leaving a flat white spot — which is
+        // not what a telegraph is supposed to look like.
       }),
       halo: new MeshStandardMaterial({
         color: '#ff8855',
@@ -377,7 +385,9 @@ function buildInstance(id: EnemyId): ModelInstance | null {
 
   // A kit's own scale is an accident of whoever exported it; the definition's height is what
   // every readability decision in the game was tuned against, including "a Skulker is small".
-  clone.scale.setScalar(modelScale(spec.sourceHeight, definition.height))
+  // The CC0 pack's rigs still read oversized once normalised to that height, so every model gets
+  // knocked down to 60% on top of the height correction.
+  clone.scale.setScalar(modelScale(spec.sourceHeight, definition.height) * MODEL_SCALE_FUDGE)
   clone.position.y = spec.yOffset ?? 0
   clone.rotation.y = spec.yawOffset ?? 0
 
@@ -398,7 +408,17 @@ function buildInstance(id: EnemyId): ModelInstance | null {
       const copy = material.clone()
       owned.push(copy)
       dissolve.push(injectDissolve(copy))
-      if (isTintable(copy)) tints.push(copy)
+      if (isTintable(copy)) {
+        // The kit's own diffuse stays on the material — that is the whole reason to import a
+        // model rather than draw a capsule — but several of these assets (a Demon/Yeti cast as
+        // the Skeleton Warrior, a Ghost/Ghost Skull as the Wraith) ship pale enough that the
+        // result reads as washed-out white regardless of how the emissive glow is tuned.
+        // Emissive is additive light on top of the texture; it cannot put colour into a diffuse
+        // that never had any. Tinting `color` multiplies onto the map instead of replacing it,
+        // so the texture's own shading survives while the hue matches the definition.
+        copy.color.set(definition.colour)
+        tints.push(copy)
+      }
       return copy
     }
     mesh.material = Array.isArray(source) ? source.map(replace) : replace(source)

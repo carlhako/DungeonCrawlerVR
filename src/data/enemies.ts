@@ -189,10 +189,14 @@ export const ENEMIES: Record<EnemyId, EnemyDefinition> = {
     cost: 1,
     minWave: 1,
     colour: '#6f8a4a',
-    glow: 0.35,
+    // Kept low. The kit's textures are already green; the emissive here is just a hint of
+    // visibility in the dark, not a wash on top of the diffuse.
+    glow: 0.15,
     model: {
       url: '/models/goblin-skulker.glb',
       sourceHeight: 1.2,
+      // The kit's rig faces +Z, away from the player it is chasing. Flip it to face forward.
+      yawOffset: Math.PI,
       clips: {
         idle: ['Idle'],
         // It is the fast one, and it should look it even standing still between lunges.
@@ -230,11 +234,16 @@ export const ENEMIES: Record<EnemyId, EnemyDefinition> = {
     gold: 18,
     cost: 3,
     minWave: 1,
-    colour: '#d8d2c0',
-    glow: 0.25,
+    // A more saturated bone than the near-white the early pass used. The skeleton's emissive is
+    // taken from this colour, and a near-white emissive paints the kit's bone textures with the
+    // same near-white wash — which is what "mostly white" reads as on the headset.
+    colour: '#b8a888',
+    glow: 0.12,
     model: {
       url: '/models/skeleton-warrior.glb',
       sourceHeight: 1.85,
+      // The kit's rig faces +Z, away from the player it is chasing. Flip it to face forward.
+      yawOffset: Math.PI,
       clips: {
         idle: ['Idle'],
         // Slow and heavy. A walk, never a run — the whole lesson of this enemy is that you can
@@ -275,13 +284,20 @@ export const ENEMIES: Record<EnemyId, EnemyDefinition> = {
     cost: 4,
     minWave: 3,
     colour: '#7fa8c8',
-    glow: 1.1,
+    // Was 1.1, which put the Wraith into channel saturation at idle — every frame, with no
+    // wind-up involved. Its visibility in the dark is already carried by the halo and the
+    // eyes; with the Ghost Skull kit's already-pale diffuse, even a modest emissive was
+    // pushing the whole body toward white. 0.1 keeps the silhouette readable in the dark
+    // without bleaching the textures.
+    glow: 0.1,
     model: {
       url: '/models/wraith.glb',
       sourceHeight: 1.9,
       // It comes through the wall, so it must not also look like it is walking on the floor.
       // The float is what sells the one thing this enemy is for.
       yOffset: 0.12,
+      // The kit's rig faces +Z, away from the player it is chasing. Flip it to face forward.
+      yawOffset: Math.PI,
       clips: {
         idle: ['Idle', 'Flying', 'Float'],
         chase: ['Flying', 'Float', 'Idle'],

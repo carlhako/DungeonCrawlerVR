@@ -15,6 +15,7 @@ import {
 import { flicker } from '@/systems/torch'
 import { CELL_SIZE, Tile, WALL_HEIGHT, type DungeonMap } from '@/systems/dungeon/generate'
 import { placedCellToWorld, useDungeon, type DungeonPlacement } from '@/systems/dungeon/store'
+import { loadWallTexture, useTiledWallMaterial } from '@/systems/environment/textures'
 
 /**
  * The generated dungeon, as geometry.
@@ -103,6 +104,14 @@ function Level({ placement }: { placement: DungeonPlacement }) {
   const cells = useMemo(() => collectCells(map), [map])
   const strips = useMemo(() => mergeWallStrips(map), [map])
 
+  useEffect(() => {
+    loadWallTexture()
+  }, [])
+
+  // Every wall cell is the same box, so one tiling — rather than one clone per instance — is
+  // correct here. `Foyer.tsx` is the case where sizes differ and cloning earns its keep.
+  const wallMaps = useTiledWallMaterial(CELL_SIZE, WALL_HEIGHT)
+
   // Instance transforms are written once: the level does not move. Doing it in a layout
   // effect rather than per frame is the difference between three draw calls and a per-frame
   // upload of a few thousand matrices.
@@ -149,7 +158,21 @@ function Level({ placement }: { placement: DungeonPlacement }) {
         receiveShadow
       >
         <boxGeometry args={[CELL_SIZE, WALL_HEIGHT, CELL_SIZE]} />
-        <meshStandardMaterial color={STONE} roughness={0.95} />
+        {/*
+          Keyed on whether the textures have arrived, same reason as in Foyer: a
+          `meshStandardMaterial` first mounted without a `map` caches a shader compiled
+          without `USE_MAP`, so a texture assigned later is bound to the GPU but never
+          sampled. A player who opens the door before the foyer finishes loading its
+          textures would otherwise see flat dungeon walls that never pick up the stone.
+        */}
+        <meshStandardMaterial
+          key={wallMaps ? 'textured' : 'flat'}
+          color={wallMaps ? '#ffffff' : STONE}
+          map={wallMaps?.map}
+          normalMap={wallMaps?.normalMap}
+          roughnessMap={wallMaps?.roughnessMap}
+          roughness={wallMaps ? 1 : 0.95}
+        />
       </instancedMesh>
 
       {/* A ceiling matters more than it sounds: an open-topped level reads as a film set in

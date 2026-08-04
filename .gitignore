@@ -16,3 +16,8 @@ artifacts/
 public/models/*.glb
 public/models/*.gltf
 public/models/*.bin
+
+# The wall texture is downloaded, not committed — see public/textures/README.md. Same reasoning
+# as the enemy pack: CC0, so this is about weight and provenance, not licensing.
+public/textures/*.jpg
+public/textures/*.png
