@@ -333,6 +333,60 @@ export function findArcHit(
  */
 export const MAX_TELEPORT_SLOPE_DEGREES = 45
 
+/**
+ * Per-hand contribution to the body's horizontal motion in gorilla mode.
+ *
+ * Pulling a hand towards the body pushes the body in the opposite direction — the
+ * inversion is the whole mechanism. When the hand is not gripping, the contribution is
+ * exactly zero so the player can rest their arms without drifting backwards.
+ *
+ * `transferFactor` is the multiplier on the hand's per-step displacement. 1.0 (the
+ * Gorilla Locomotion default) means the body moves exactly as far as the hand did; tuning
+ * it up or down changes how "weighty" the motion feels.
+ *
+ * Pure so the test in `locomotion.gorilla.test.ts` can lock the contract independently of
+ * three.js, Rapier, or any session state.
+ */
+export function gorillaHandContribution(
+  prev: Vec3,
+  current: Vec3,
+  gripping: boolean,
+  transferFactor = 1,
+): Vec3 {
+  if (!gripping) return { x: 0, y: 0, z: 0 }
+  return {
+    x: -(current.x - prev.x) * transferFactor,
+    y: -(current.y - prev.y) * transferFactor,
+    z: -(current.z - prev.z) * transferFactor,
+  }
+}
+
+/**
+ * Where the body sits in space when both hands are anchoring it to a wall.
+ *
+ * The midpoint of the two hands is the natural anchor — pull both hands up by the same
+ * amount and the body rises by the inverse of that amount, without any orientation work.
+ * Adding `wallNormal * bodyOffset` keeps the capsule clear of the wall mesh so the renderer
+ * and the physics agree about where the body is.
+ *
+ * `wallNormal` is expected to be unit length; the function does not normalise it because
+ * the caller already has the value from a Rapier raycast hit and renormalising silently is
+ * the kind of behaviour that makes "why does the body sit off the wall" a forty-minute
+ * debug session.
+ */
+export function gorillaBodyFromHands(
+  h1: Vec3,
+  h2: Vec3,
+  wallNormal: Vec3,
+  bodyOffset: number,
+): Vec3 {
+  return {
+    x: (h1.x + h2.x) / 2 + wallNormal.x * bodyOffset,
+    y: (h1.y + h2.y) / 2 + wallNormal.y * bodyOffset,
+    z: (h1.z + h2.z) / 2 + wallNormal.z * bodyOffset,
+  }
+}
+
 export function isValidLanding(
   normal: Vec3,
   maxSlopeDegrees: number = MAX_TELEPORT_SLOPE_DEGREES,

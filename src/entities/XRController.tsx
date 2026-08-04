@@ -2,6 +2,7 @@ import { Suspense } from 'react'
 import { XRControllerModel, XRSpace, useXRInputSourceStateContext } from '@react-three/xr'
 import type { Object3D } from 'three'
 import { setAim } from '@/systems/xrAim'
+import { setHand } from '@/systems/xrHands'
 import { VRWeaponRig } from '@/entities/WeaponRig'
 import { PointerBeam } from '@/ui/PointerBeam'
 
@@ -36,6 +37,17 @@ export function GameXRController() {
       {(handedness === 'left' || handedness === 'right') && (
         <VRWeaponRig handedness={handedness} mount="grip" />
       )}
+
+      {/* The grip-pose Object3D, separate from the target ray published via `xrAim`. The
+          gorilla locomotion module reads `xrHands.{left,right}` to know where the hand
+          actually *is*, not where it is aimed — a 45°-tilted target ray aimed at the wall
+          is not the same point as the controller in the player's fist. */}
+      <XRSpace
+        space="grip-space"
+        ref={(object: Object3D | null) => {
+          setHand(handedness, object)
+        }}
+      />
 
       <XRSpace
         space="target-ray-space"

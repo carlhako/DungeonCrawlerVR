@@ -18,7 +18,7 @@ import { persist } from 'zustand/middleware'
  */
 
 /** How the player moves through the world in VR. */
-export type LocomotionMode = 'smooth' | 'teleport'
+export type LocomotionMode = 'smooth' | 'teleport' | 'gorilla'
 
 /** How the player turns in VR. Desktop always uses the mouse. */
 export type TurnMode = 'snap' | 'smooth'
@@ -113,7 +113,10 @@ export const SETTING_LIMITS = {
 
 /** Allowed values for the enumerated settings, in the order a UI should present them. */
 export const SETTING_OPTIONS = {
-  locomotion: ['smooth', 'teleport'],
+  // Gorilla sits after the established two: it is opt-in, and reading the list left-to-right
+  // is what a player who has never heard of it is most likely to do, so the newcomer goes
+  // last rather than being smuggled in between the two familiar options.
+  locomotion: ['smooth', 'teleport', 'gorilla'],
   turn: ['snap', 'smooth'],
   mainHand: ['left', 'right'],
 } as const satisfies Record<string, readonly string[]>

@@ -40,6 +40,7 @@ import { sampleShake, type ShakeOffset } from '@/systems/fx/shake'
 import { shakeState } from '@/systems/fx/state'
 import { xrInput } from '@/systems/xrInput'
 import { consumeTeleport } from '@/entities/Teleport'
+import { consumeGorillaMotion } from '@/systems/gorillaLocomotion'
 
 /**
  * The player: a kinematic capsule driven by Rapier's character controller, carrying the XR
@@ -228,6 +229,10 @@ function CharacterController({ body, collider, yawGroup, originGroup }: Controll
       playerState.yaw = inVR ? yawNode.rotation.y : desktopInput.yaw
 
       const teleporting = inVR && config.locomotion === 'teleport'
+      // Gorilla is opt-in and VR-only: on desktop with this setting, the rig falls through
+      // to the smooth-mode path because the gorilla module is inert outside a session.
+      const gorillaMode = inVR && config.locomotion === 'gorilla'
+      const gorilla = gorillaMode ? consumeGorillaMotion() : null
 
       // Head-relative in VR: you walk where you look. The heading already includes the
       // rig's yaw, because it is read from a world matrix.
@@ -250,29 +255,62 @@ function CharacterController({ body, collider, yawGroup, originGroup }: Controll
         ? xrInput.right.primary.justPressed
         : desktopInput.jump.justPressed && !interactionState.consumedActivate
 
-      scratch.desired.x = move.x * speed * dt
-      scratch.desired.z = move.y * speed * dt
-      scratch.desired.y = integrateVertical(
-        scratch.vertical,
-        playerState.grounded,
-        jump && !teleporting,
-        dt,
-      )
+      // In gorilla mode the A button is reserved for "use-or-fire" — arm-swinging replaces
+      // jumping as the way to leave the floor. A player mid-climb is not asking to jump.
+      const allowJump = jump && !teleporting && !gorillaMode
 
-      character.computeColliderMovement(capsule, scratch.desired)
-      const corrected = character.computedMovement()
-      const grounded = character.computedGrounded()
+      let nextX: number
+      let nextY: number
+      let nextZ: number
+      let corrected: { x: number; y: number; z: number }
+      let grounded: boolean
+      // True when the gorilla module drove the body this step. The speed write-up below
+      // needs to know, because the wall-state bypass produces no `corrected` to measure.
+      let gorillaDroveThisStep = false
 
-      // Blocked on the way up means a ceiling. Keeping the velocity would pin the player
-      // against it for the rest of the jump.
-      if (scratch.vertical.velocity > 0 && corrected.y < scratch.desired.y - 1e-4) {
+      if (gorilla && gorilla.bodyPositionOverride != null) {
+        // Wall state: the body position comes from the analytic hand solve, not from the
+        // character controller. Gravity is also skipped — the hands are doing the work, and
+        // clearing the cached velocity means a release drops to rest rather than picking up
+        // whatever speed a jump might have left behind. Recentring is skipped below for the
+        // same reason: the body is anchored to the wall, not to the head.
+        nextX = gorilla.bodyPositionOverride.x
+        nextY = gorilla.bodyPositionOverride.y
+        nextZ = gorilla.bodyPositionOverride.z
+        grounded = playerState.grounded
+        corrected = { x: 0, y: 0, z: 0 }
         scratch.vertical.velocity = 0
-      }
+        gorillaDroveThisStep = true
+      } else {
+        // In gorilla mode (non-wall) the module owns xz motion — hand math on the floor or
+        // joystick fallback when the arms are at rest. In every other mode the smooth-stick
+        // move applies, exactly as before.
+        const horizontalX = gorillaMode && gorilla ? gorilla.motion.x : move.x * speed
+        const horizontalZ = gorillaMode && gorilla ? gorilla.motion.z : move.y * speed
+        scratch.desired.x = horizontalX * dt
+        scratch.desired.z = horizontalZ * dt
+        scratch.desired.y = integrateVertical(
+          scratch.vertical,
+          playerState.grounded,
+          allowJump,
+          dt,
+        )
 
-      const current = rigidBody.translation()
-      let nextX = current.x + corrected.x
-      let nextY = current.y + corrected.y
-      let nextZ = current.z + corrected.z
+        character.computeColliderMovement(capsule, scratch.desired)
+        corrected = character.computedMovement()
+        grounded = character.computedGrounded()
+
+        // Blocked on the way up means a ceiling. Keeping the velocity would pin the player
+        // against it for the rest of the jump.
+        if (scratch.vertical.velocity > 0 && corrected.y < scratch.desired.y - 1e-4) {
+          scratch.vertical.velocity = 0
+        }
+
+        const current = rigidBody.translation()
+        nextX = current.x + corrected.x
+        nextY = current.y + corrected.y
+        nextZ = current.z + corrected.z
+      }
 
       // A completed teleport is an absolute move, not a translation to be resolved — the
       // whole point is that it skips the space in between.
@@ -280,7 +318,9 @@ function CharacterController({ body, collider, yawGroup, originGroup }: Controll
       // head, and slide the play space back by the same amount so the head does not move in
       // world space as a result. Without this, walking two metres across your living room
       // leaves your body behind at the spawn point and you can put your head through a wall.
-      if (inVR) {
+      // Skipped in gorilla wall state: the body is anchored to the wall by the grip, not
+      // to the head, and recentring would tug the capsule off the wall each step.
+      if (inVR && !gorillaDroveThisStep) {
         const originNode = originGroup.current
         const headX = scratch.headMatrix.elements[12] ?? 0
         const headZ = scratch.headMatrix.elements[14] ?? 0
@@ -338,8 +378,14 @@ function CharacterController({ body, collider, yawGroup, originGroup }: Controll
       playerState.position.z = nextZ
       playerState.grounded = grounded
       // Actual speed, not requested: walking into a wall should not close the comfort
-      // vignette, because the view isn't moving.
-      playerState.speed = landing ? 0 : Math.hypot(corrected.x, corrected.z) / dt
+      // vignette, because the view isn't moving. In the gorilla wall-state bypass the body
+      // moves by the analytic hand solve, not by `corrected` — the speed is the per-step
+      // body translation directly, which the comfort vignette can use to track climbing.
+      playerState.speed = landing
+        ? 0
+        : gorillaDroveThisStep
+          ? Math.hypot(nextX - rigidBody.translation().x, nextZ - rigidBody.translation().z) / dt
+          : Math.hypot(corrected.x, corrected.z) / dt
       playerState.turning = inVR && config.turn === 'smooth' && turned !== 0
     },
     SystemOrder.Player,

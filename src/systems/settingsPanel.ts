@@ -84,9 +84,9 @@ const ROW_TOP = 0.34
 const ROW_PITCH = 0.082
 const ROW_HEIGHT = 0.066
 
-/** Option buttons: two per row, filling the right-hand column. */
-const OPTION_W = 0.32
-const OPTION_CX: readonly [number, number] = [0.04, 0.39]
+/** Option buttons: three across in the right-hand column. */
+const OPTION_W = 0.24
+const OPTION_CX: readonly [number, number, number] = [-0.2, 0.06, 0.32]
 
 /** Steppers: a wide-enough target at either end of the value. */
 const STEP_W = 0.16
@@ -137,6 +137,7 @@ const STEPPED_ROWS: SteppedRow[] = [
 const OPTION_LABEL: Record<string, string> = {
   smooth: 'Smooth',
   teleport: 'Teleport',
+  gorilla: 'Gorilla',
   snap: 'Snap',
   left: 'Left',
   right: 'Right',
@@ -173,11 +174,15 @@ export function settingsButtons(settings: Settings): SettingsButton[] {
     buttons.push({
       id: `set-locomotion-${value}`,
       action: { kind: 'locomotion', value },
-      rect: { cx: OPTION_CX[index === 0 ? 0 : 1], cy: rowY(0), w: OPTION_W, h: ROW_HEIGHT },
+      rect: { cx: OPTION_CX[index]!, cy: rowY(0), w: OPTION_W, h: ROW_HEIGHT },
       label: optionLabel(value),
       state: settings.locomotion === value ? 'done' : 'available',
       prompt:
-        value === 'teleport' ? 'Move by teleporting' : 'Move smoothly with the stick',
+        value === 'gorilla'
+          ? 'Swing arms to walk; grip walls to climb'
+          : value === 'teleport'
+            ? 'Move by teleporting'
+            : 'Move smoothly with the stick',
     })
   })
 

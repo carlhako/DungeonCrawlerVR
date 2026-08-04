@@ -21,6 +21,7 @@ import {
 import { Haptic, pulsePreset } from '@/systems/haptics'
 import { xrInput } from '@/systems/xrInput'
 import { xrAim } from '@/systems/xrAim'
+import { useSettings } from '@/systems/settings'
 
 /**
  * Drives the interaction focus once per fixed step, and turns a button press into an
@@ -45,11 +46,12 @@ export function InteractionDriver() {
   const inSession = useXR((state) => state.session != null)
   const right = useXRInputSourceState('controller', 'right')
   const left = useXRInputSourceState('controller', 'left')
+  const locomotion = useSettings((state) => state.locomotion)
 
   // Refs, not dependencies: controllers reconnect freely mid-session and the fixed-loop
   // system must not be torn down and re-registered when one does.
-  const latest = useRef({ camera, inSession, right, left })
-  latest.current = { camera, inSession, right, left }
+  const latest = useRef({ camera, inSession, right, left, gripIsLocomotion: locomotion === 'gorilla' })
+  latest.current = { camera, inSession, right, left, gripIsLocomotion: locomotion === 'gorilla' }
 
   const scratch = useMemo(
     () => ({
@@ -162,7 +164,17 @@ export function InteractionDriver() {
           // already on the thing — a grab is a grab, whichever finger you use for it.
           // Either way it is the hand that found the focus that has to press, so pointing
           // with one hand is not confirmed by a trigger pull on the other.
-          handPressed(scratch.focusHand, rightPad, leftPad, source === 'reach')
+          //
+          // In gorilla mode, grip is reserved for locomotion (arm-swinging, climbing) and
+          // is never an "activate" gesture — a player holding a wall should not have a
+          // door nearby silently open because they gripped. Only the trigger activates.
+          handPressed(
+            scratch.focusHand,
+            rightPad,
+            leftPad,
+            source === 'reach',
+            latest.current.gripIsLocomotion,
+          )
         : desktopInput.jump.justPressed
 
       if (pressed && activateFocus() && inVR) {
@@ -187,8 +199,12 @@ function handPressed(
   right: XRControllerState | undefined,
   left: XRControllerState | undefined,
   includeGrip: boolean,
+  gripIsLocomotion: boolean,
 ): boolean {
   const input = hand && hand === left ? xrInput.left : hand === right ? xrInput.right : null
   if (!input) return false
-  return input.trigger.justPressed || (includeGrip && input.grip.justPressed)
+  if (input.trigger.justPressed) return true
+  // Grip confirms only when it is the activation gesture. Gorilla mode reserves grip for
+  // locomotion; smooth and teleport modes both let a hand-grip confirm a near-grab.
+  return includeGrip && !gripIsLocomotion && input.grip.justPressed
 }

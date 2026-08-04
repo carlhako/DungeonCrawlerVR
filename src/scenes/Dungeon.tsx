@@ -241,28 +241,40 @@ function Colliders({ placement, strips }: { placement: DungeonPlacement; strips:
   const middle = placedCellToWorld(placement, map.width / 2 - 0.5, map.height / 2 - 0.5)
 
   return (
-    <RigidBody type="fixed" colliders={false}>
-      {/* Floor and ceiling as two slabs across the whole grid. Solid rock is unreachable
+    <>
+      {/* Floor and ceiling as two slabs across the whole grid, in their own rigid body so
+          the wall strip can carry its own user data (see below). Solid rock is unreachable
           anyway, so there is nothing to be gained by cutting them to shape — and a
           zero-thickness floor is something a fast body ends up on the wrong side of. */}
-      <CuboidCollider args={[half.x, 0.5, half.z]} position={[middle.x, -0.5, middle.z]} />
-      <CuboidCollider
-        args={[half.x, 0.5, half.z]}
-        position={[middle.x, WALL_HEIGHT + 0.5, middle.z]}
-      />
+      <RigidBody type="fixed" colliders={false}>
+        <CuboidCollider args={[half.x, 0.5, half.z]} position={[middle.x, -0.5, middle.z]} />
+        <CuboidCollider
+          args={[half.x, 0.5, half.z]}
+          position={[middle.x, WALL_HEIGHT + 0.5, middle.z]}
+        />
+      </RigidBody>
 
-      {strips.map((strip) => {
-        const from = placedCellToWorld(placement, strip.x, strip.y)
-        const width = (strip.length * CELL_SIZE) / 2
-        return (
-          <CuboidCollider
-            key={`${strip.x}-${strip.y}`}
-            args={[width, WALL_HEIGHT / 2, CELL_SIZE / 2]}
-            position={[from.x - CELL_SIZE / 2 + width, WALL_HEIGHT / 2, from.z]}
-          />
-        )
-      })}
-    </RigidBody>
+      {/* All wall strips share one rigid body, so a single `userData.grippable` flag covers
+          every climbable surface in the dungeon. Future hazards (lava, magical barriers)
+          live in their own rigid body with `grippable: false` — the gorilla module reads the
+          flag from `collider.parent()` and refuses a grip on anything that does not carry
+          it. Splitting walls out from the floor costs Rapier one extra body, which is the
+          price of being able to mark a *class* of colliders climbable rather than each one
+          individually. */}
+      <RigidBody type="fixed" colliders={false} userData={{ grippable: true }}>
+        {strips.map((strip) => {
+          const from = placedCellToWorld(placement, strip.x, strip.y)
+          const width = (strip.length * CELL_SIZE) / 2
+          return (
+            <CuboidCollider
+              key={`${strip.x}-${strip.y}`}
+              args={[width, WALL_HEIGHT / 2, CELL_SIZE / 2]}
+              position={[from.x - CELL_SIZE / 2 + width, WALL_HEIGHT / 2, from.z]}
+            />
+          )
+        })}
+      </RigidBody>
+    </>
   )
 }
 

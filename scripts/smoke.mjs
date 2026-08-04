@@ -831,6 +831,13 @@ await page.evaluate(() => window.__DCVR__.lookAt(-1.95, 1.5, -5.82))
 settings.walkOver = await walkUntil(['KeyW'], (p) => p.z < -3.9, 12)
 settings.teleportFocus = await pressButton('set-locomotion-teleport')
 settings.afterTeleport = await readSettings()
+// Gorilla is the third locomotion option. Switching to it and back proves the new button is
+// mounted on the board, that the setting round-trips through the same path as the others,
+// and that "Restore defaults" still lands on smooth — which is the contract new players get.
+settings.gorillaFocus = await pressButton('set-locomotion-gorilla')
+settings.afterGorilla = await readSettings()
+await pressButton('set-locomotion-smooth')
+settings.afterSmoothReturn = await readSettings()
 await pressButton('set-comfortVignette-down')
 await pressButton('set-snapTurnDegrees-up')
 settings.afterSteps = await readSettings()
@@ -1303,11 +1310,26 @@ if (!set.teleportFocus || set.teleportFocus.id !== 'set-locomotion-teleport') {
   if (set.afterTeleport?.locomotion !== 'teleport') {
     failures.push(`pressing Teleport did not change locomotion: ${set.afterTeleport?.locomotion}`)
   }
+  // Gorilla is the third option on the board. Switching to it must change the setting, and
+  // switching back to Smooth must too — same contract as the other two.
+  if (set.gorillaFocus?.id !== 'set-locomotion-gorilla') {
+    failures.push(`the Gorilla button was not offered: ${JSON.stringify(set.gorillaFocus)}`)
+  }
+  if (set.afterGorilla?.locomotion !== 'gorilla') {
+    failures.push(`pressing Gorilla did not change locomotion: ${set.afterGorilla?.locomotion}`)
+  }
+  if (set.afterSmoothReturn?.locomotion !== 'smooth') {
+    failures.push(
+      `switching back to Smooth did not take: ${set.afterSmoothReturn?.locomotion}`,
+    )
+  }
   if (set.afterSteps?.comfortVignette !== 0.65 || set.afterSteps?.snapTurnDegrees !== 45) {
     failures.push(`steppers did not step cleanly: ${JSON.stringify(set.afterSteps)}`)
   }
-  if (set.persisted?.locomotion !== 'teleport') {
-    failures.push('settings changed on the board did not reach localStorage')
+  if (set.persisted?.locomotion !== 'smooth') {
+    failures.push(
+      `settings changed on the board did not reach localStorage: ${set.persisted?.locomotion}`,
+    )
   }
   if (set.afterDefaults?.locomotion !== 'smooth' || set.afterDefaults?.comfortVignette !== 0.7) {
     failures.push(`Restore defaults left something behind: ${JSON.stringify(set.afterDefaults)}`)

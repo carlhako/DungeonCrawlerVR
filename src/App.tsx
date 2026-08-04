@@ -25,6 +25,7 @@ import { Enemies } from '@/entities/Enemies'
 import { Particles } from '@/entities/Particles'
 import { Projectiles } from '@/entities/Projectiles'
 import { TeleportAim } from '@/entities/Teleport'
+import { GorillaLocomotion } from '@/systems/gorillaLocomotion'
 import { DesktopWeaponRig } from '@/entities/WeaponRig'
 import { ComfortVignette } from '@/ui/ComfortVignette'
 import { EnemyCounter } from '@/ui/EnemyCounter'
@@ -106,6 +107,10 @@ function World() {
       {scene === 'foyer' && <Dungeon />}
       <PlayerRig />
       <TeleportAim />
+      {/* Gorilla locomotion runs at the same slot TeleportAim does (Player - 1). The rig
+          reads whichever one was active this step; the two are mutually exclusive by
+          setting. */}
+      <GorillaLocomotion />
       <InteractionDriver />
       <InteractPrompt />
       <RunDriver />
