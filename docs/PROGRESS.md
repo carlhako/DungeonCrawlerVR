@@ -7,24 +7,21 @@ sprint, before committing. The roadmap itself lives in [PLAN.md](PLAN.md).
 
 ## Current position
 
-> **Epics 0 and 1 are signed off on the Quest 3, and so are Sprints 2.1 and 2.2. Sprint 2.3 —
-> enemies, AI and the wave loop — is written and green on the desktop, and is waiting on a
-> Quest 3 pass. Sprint 2.4 — stealth & enemy awareness — is also desktop-green and awaiting
-> its Quest 3 pass. Sprint 2.5 — HUD overlays: enemy counter and explored-area map — is
-> signed off on the Quest 3: both HUDs were invisible in the headset on the first pass (the
-> XR camera's projection matrix is asymmetric and the placement math assumed it wasn't), and
-> once visible they were pinned to the top edge and a bottom corner, past where a headset's
-> FOV reaches without turning the head. Both are now a hold-to-show popup near screen centre,
-> summoned by holding a face button on either controller. Sprint 2.6 — hit feedback & VFX — is also
-> desktop-green and awaiting its Quest 3 pass: bolts leave a muzzle flash and a trail, hits
-> throw sparks, kills come apart in ash and dissolve, and the camera never moves in VR.
-> Sprint 2.7 — enemy models & textures — is **built and desktop-green, and waiting on the
-> art**. Everything that turns a GLB into an enemy is in and tested: the loader, the clip
-> mapping, the material contract, and `EnemyShape` as the seam Sprint 2.3 promised. What is not
-> in is the pack itself — `public/models/` is empty by design, Carl downloads it (its README
-> says exactly what and where), and until he does, every enemy is still the capsule it has been
-> since 2.3. That is not a broken state: a missing model is a resolved answer, not an error.
-> Four Quest 3 passes are outstanding behind it.**
+> **Epics 0 and 1 are signed off on the Quest 3, and so is all of Epic 2.** Sprint 2.3 —
+> enemies, AI and the wave loop — passed its headset check: the telegraph reads from across a
+> dark room and a wind-up gives enough time to step out of the swing. Sprint 2.4 — stealth &
+> enemy awareness — is confirmed in the headset too. Sprint 2.5 — HUD overlays: enemy counter
+> and explored-area map — is signed off on the Quest 3: both HUDs were invisible in the
+> headset on the first pass (the XR camera's projection matrix is asymmetric and the
+> placement math assumed it wasn't), and once visible they were pinned to the top edge and a
+> bottom corner, past where a headset's FOV reaches without turning the head. Both are now a
+> hold-to-show popup near screen centre, summoned by holding a face button on either
+> controller. Sprint 2.6 — hit feedback & VFX — passed on the Quest 3 as well: the muzzle
+> flash, trail, impact sparks and the dissolve all read correctly under torchlight, and
+> nothing about a hit, a kill, or taking damage moves the view. Sprint 2.7 — enemy models &
+> textures — is also signed off: the Quaternius pack landed in `public/models/`, the loader,
+> clip mapping and material contract all held up unchanged, and from across a dark room a
+> Skulker, a Warrior and a Wraith still read as different things.**
 >
 > **There is something in the dungeon now.** Open the door, walk down the passage into the
 > generated level, and a wave composed from the wave number comes looking for you: Goblin
@@ -64,11 +61,11 @@ sprint, before committing. The roadmap itself lives in [PLAN.md](PLAN.md).
 | | 1.4 In-world options & new game | ✅ Verified on Quest 3 |
 | **2 — Wave Combat Core** | 2.1 Procedural dungeon generation | ✅ Verified on Quest 3 |
 | | 2.2 Weapon & attack framework | ✅ Verified on Quest 3 |
-| | 2.3 Enemies, AI & wave loop | 🟡 Desktop green — Quest 3 pass outstanding |
-| | 2.4 Stealth & enemy awareness | ✅ Desktop green — Quest 3 pass outstanding |
+| | 2.3 Enemies, AI & wave loop | ✅ Verified on Quest 3 |
+| | 2.4 Stealth & enemy awareness | ✅ Verified on Quest 3 |
 | | 2.5 HUD overlays: enemy counter & map | ✅ Verified on Quest 3 |
-| | 2.6 Hit feedback & VFX | ✅ Desktop green — Quest 3 pass outstanding |
-| | 2.7 Enemy models & textures | 🟡 Built & desktop-green — needs the Quaternius pack in `public/models/` |
+| | 2.6 Hit feedback & VFX | ✅ Verified on Quest 3 |
+| | 2.7 Enemy models & textures | ✅ Verified on Quest 3 |
 | **3 — Fear & Atmosphere** | 3.1 Darkness & lighting | ⬜ |
 | | 3.2 Spatial audio | ⬜ |
 | | 3.3 Horror direction | ⬜ |
@@ -855,7 +852,7 @@ Known scaffolding, and the gaps:
 - Purchase and combat **audio is Sprint 3.2**, as it has been since 1.3.
 - The dummies are primitives, like everything else. Still no CC0 art kit.
 
-### 🟡 Sprint 2.3 — Enemies, AI & the wave loop
+### ✅ Sprint 2.3 — Enemies, AI & the wave loop
 
 **Verified on desktop:** typecheck clean · 602/602 unit tests · production build succeeds ·
 smoke test plays the whole loop — out of the door, into the generated level, waits for the
@@ -864,10 +861,11 @@ the wand, clears the rest, walks home, and checks the payout is exactly the sum 
 Then it goes back out, gets hit by a real enemy, dies to one, and checks it came back to the
 foyer whole with exactly the gold, weapons and wave number it left with.
 
-**Not yet verified on the Quest 3.** The headset checklist is README items 16 and 17, and the
-one thing on it that cannot be judged at a desk is the telegraph: whether the wind-up is
-actually readable from across a dark room, and whether you can step out of a swing. That is
-the whole design of this sprint and a monitor cannot answer it.
+**Verified on the Quest 3 (2026-08-05).** README items 16 and 17: the telegraph reads from
+across a dark room, and the wind-up gives enough time to step out of the swing before it
+lands. A wave arrives, closes the gap, kills and can be killed by; clearing pays out and
+dying returns the player to the foyer whole. The one thing this sprint's design lives or
+dies on is the thing a monitor cannot judge, and the headset confirms it holds.
 
 Delivered — the rules, all pure and unit-tested, none of them importing three.js:
 
@@ -989,6 +987,10 @@ Known scaffolding, and the gaps:
 ### ✅ Sprint 2.4 — Stealth & enemy awareness
 
 **Verified on desktop:** typecheck clean · 619/619 unit tests · production build succeeds.
+
+**Verified on the Quest 3 (2026-08-05).** Crossing a large room unseen is genuinely harder
+than a corridor, an idle enemy alerts on a wand shot or a swing whether or not it lands, and
+nothing hunts before it's had a real chance to notice the player.
 
 Delivered:
 
@@ -1147,11 +1149,12 @@ smoke test fires a held volley and samples the effect state *while it is firing*
 in the air, camera trauma rising — then waits out the burn and checks both have gone back to
 zero. The wave screenshot shows a body coming apart in ash.
 
-**Not yet verified on the Quest 3.** The headset checklist is README item 18, and almost all
-of it is a judgement a monitor cannot make: whether a burst reads in a corridor lit by six
-torches without whiting out the thing you are fighting, whether the dissolve reads as a body
-burning away rather than blinking out — and, the one that beats everything else, whether
-anything at all moves the view.
+**Verified on the Quest 3 (2026-08-05).** README item 18: the muzzle flash and ember trail
+read on the Emberwand, sparks land in the right element's colour, a kill throws a wider ash
+burst and dissolves from a glowing edge over about a second and a half without whiting out
+the corridor's own torchlight, and a pack coming apart at once holds up under head turns.
+Nothing about landing a hit, taking one, or a kill moved, tilted, slowed or jolted the view
+by any amount — the one thing on this checklist that beats everything else on it.
 
 Delivered — the rules, all pure and unit-tested, none of them importing three.js:
 
@@ -1273,23 +1276,22 @@ Known scaffolding, and the gaps:
   Left alone deliberately: the HUD is not where this sprint's feedback belongs, and a counter
   that animates competes with the burst that caused it.
 
-### 🟡 Sprint 2.7 — Enemy models & textures
+### ✅ Sprint 2.7 — Enemy models & textures
 
 **Verified on desktop:** typecheck clean · 716/716 unit tests · production build succeeds ·
 smoke test plays the whole loop and now also reports what became of every model file, asserting
 that each one *settled* — loaded or gave up — rather than leaving a fetch hanging.
 
-**The art is not here, and that is the state the sprint was designed to ship in.**
-`public/models/` contains a README and nothing else. Carl downloads the Quaternius CC0 pack into
-it — three files, named in that README — and every enemy becomes a creature with no other change
-anywhere. Until then they are the capsules they have been since 2.3. A missing GLB is a resolved
-answer, not an error: no exception, no retry loop, no red console, and a wave that plays exactly
-as it did yesterday.
+**The art was not here at first, and that was the state the sprint was designed to ship in.**
+`public/models/` held a README and nothing else; Carl downloaded the Quaternius CC0 pack into
+it — three files, named in that README — and every enemy became a creature with no other change
+anywhere. A missing GLB was a resolved answer, not an error: no exception, no retry loop, no red
+console, and a wave that played exactly as it had the day before. (The follow-up entry below
+covers the one defect the pack's arrival actually surfaced.)
 
-**Not yet verified on the Quest 3**, and it cannot be until the pack lands. The checklist is
-README item 19, and its acceptance test is one question a monitor cannot answer: from across a
-dark room, can you still tell a Skulker from a Warrior from a Wraith, and a wind-up from a walk,
-in time to step out of it.
+**Verified on the Quest 3 (2026-08-05).** README item 19: from across a dark room, a Skulker, a
+Warrior and a Wraith still read as three different things, and a wind-up still reads as a
+wind-up rather than a walk, in time to step out of it.
 
 Delivered — the rules, pure and unit-tested, none of them importing three.js:
 
