@@ -152,6 +152,20 @@ export function resetXRInput(): void {
 }
 
 /**
+ * Either face button, on either hand — A/X or B/Y. Held, not tapped: the HUD popup this
+ * gates is meant to disappear the instant the button is let go, same as glancing at a real
+ * wrist display.
+ */
+export function sideButtonHeld(): boolean {
+  return (
+    xrInput.left.primary.pressed ||
+    xrInput.left.secondary.pressed ||
+    xrInput.right.primary.pressed ||
+    xrInput.right.secondary.pressed
+  )
+}
+
+/**
  * Apply a full set of gamepad readings to one hand.
  *
  * `read(id)` looks up a component by its `xr-standard-*` id; this stays generic over the

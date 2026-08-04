@@ -7,6 +7,7 @@
 
 import { useEffect, useMemo, useRef } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
+import { sideButtonHeld } from '@/systems/xrInput'
 import {
   CanvasTexture,
   DoubleSide,
@@ -39,6 +40,7 @@ export function HudOverlay({
   anchor,
   renderOrder,
   draw,
+  requireSideButton,
 }: {
   sizeMetres: [number, number]
   canvasSize: HudCanvasSize
@@ -46,6 +48,12 @@ export function HudOverlay({
   anchor: [number, number, number]
   renderOrder: number
   draw: (ctx: CanvasRenderingContext2D, width: number, height: number) => void
+  /**
+   * Gate visibility on `sideButtonHeld()` while a VR session is presenting — a HUD popup
+   * rather than something permanently in view. No effect on desktop, where there's no
+   * controller to hold: the overlay just stays on, same as before this existed.
+   */
+  requireSideButton?: boolean
 }) {
   const gl = useThree((state) => state.gl)
   const camera = useThree((state) => state.camera)
@@ -99,7 +107,11 @@ export function HudOverlay({
     const dome = meshRef.current
     if (!dome) return
 
-    const head = gl.xr.isPresenting ? gl.xr.getCamera() : camera
+    const isPresenting = gl.xr.isPresenting
+    dome.visible = !requireSideButton || !isPresenting || sideButtonHeld()
+    if (!dome.visible) return
+
+    const head = isPresenting ? gl.xr.getCamera() : camera
 
     // Identical to ComfortVignette.
     headMatrix.copy(head.matrixWorld)
