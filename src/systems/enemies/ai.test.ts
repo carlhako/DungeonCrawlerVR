@@ -3,6 +3,7 @@ import { CORPSE_SECONDS, ENEMIES, SPAWN_SECONDS, type EnemyId } from '@/data/ene
 import { applyStatus } from '@/systems/combat/damage'
 import { MAX_IDLE_SECONDS, QUIET_DETECTION } from '@/systems/stealth'
 import {
+  LOSE_INTEREST_SECONDS,
   RANGE_HYSTERESIS,
   enterPhase,
   killEnemy,
@@ -203,6 +204,60 @@ describe('chasing', () => {
     run(enemy, context({ player: { x: 0, y: 1.05, z: -8 } }), SPAWN_SECONDS + 1)
     // Walking towards -Z is yaw 0, which is where three.js points at rest.
     expect(Math.abs(enemy.yaw)).toBeLessThan(0.2)
+  })
+})
+
+describe('losing interest', () => {
+  it('keeps chasing through a brief break in line of sight', () => {
+    const enemy = makeEnemy()
+    enterPhase(enemy, 'chase')
+    enemy.target.enabled = true
+    run(enemy, context({ visible: false }), LOSE_INTEREST_SECONDS - 0.5)
+    expect(enemy.phase).toBe('chase')
+  })
+
+  it('gives up after losing sight of the player for long enough', () => {
+    const enemy = makeEnemy()
+    enterPhase(enemy, 'chase')
+    enemy.target.enabled = true
+    enemy.alerted = true
+    run(enemy, context({ visible: false }), LOSE_INTEREST_SECONDS + STEP * 2)
+    expect(enemy.phase).toBe('idle')
+    expect(enemy.alerted).toBe(false)
+  })
+
+  it('resets the give-up clock on so much as a glimpse', () => {
+    const enemy = makeEnemy()
+    enterPhase(enemy, 'chase')
+    enemy.target.enabled = true
+    run(enemy, context({ visible: false }), LOSE_INTEREST_SECONDS - 0.5)
+    // Seen again just before the clock would have run out.
+    run(enemy, context({ visible: true, player: { x: 0, y: 1.05, z: -6 } }), STEP)
+    run(enemy, context({ visible: false }), LOSE_INTEREST_SECONDS - 0.5)
+    expect(enemy.phase).toBe('chase')
+  })
+
+  it('does not spend the clock while it can see the player', () => {
+    const enemy = makeEnemy()
+    enterPhase(enemy, 'chase')
+    enemy.target.enabled = true
+    // Far longer than the give-up window, but visible throughout.
+    run(enemy, context({ player: { x: 0, y: 1.05, z: -8 } }), LOSE_INTEREST_SECONDS * 3)
+    expect(enemy.phase).not.toBe('idle')
+  })
+
+  it('a fresh chase gets a full clock, not whatever was left from the last one', () => {
+    const enemy = makeEnemy()
+    enterPhase(enemy, 'chase')
+    enemy.target.enabled = true
+    run(enemy, context({ visible: false }), LOSE_INTEREST_SECONDS - 0.2)
+    // Staggered mid-chase, then recovers back into chase — should not inherit the near-expired
+    // clock from before the stagger.
+    enterPhase(enemy, 'stagger')
+    run(enemy, context({ visible: false }), ENEMIES['skeleton-warrior'].staggerSeconds + STEP)
+    expect(enemy.phase).toBe('chase')
+    run(enemy, context({ visible: false }), 0.5)
+    expect(enemy.phase).toBe('chase')
   })
 })
 

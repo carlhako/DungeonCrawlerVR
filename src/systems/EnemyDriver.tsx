@@ -469,9 +469,11 @@ function canSee(enemy: Enemy, placement: DungeonPlacement | null, phasing: boole
  *
  * `nearestOpen` on both ends because a body resting a few centimetres inside a wall is a body
  * whose cell is solid, and because the player spends part of every wave standing in the foyer
- * or the passage — which is not on the grid at all. Falling back to the mouth means enemies
- * mass at the door rather than giving up, which is the right answer to a player who has
- * retreated: the foyer is the safe room, and they have to come out.
+ * or the passage — which is not on the grid at all. Falling back to the mouth means a retreating
+ * player is chased right up to the doorway rather than abandoned mid-corridor — but the foyer
+ * also blocks line of sight, so `stepEnemyAi`'s give-up clock is already running by the time
+ * anything arrives there. What used to be a permanent camp at the door is now a few seconds of
+ * pursuit followed by the pack standing down, not a wall of enemies waiting the player out.
  */
 function repath(enemy: Enemy, placement: DungeonPlacement): void {
   enemy.sincePath = 0

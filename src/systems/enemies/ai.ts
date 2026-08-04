@@ -7,16 +7,18 @@
  * be staggered while dying dies twice.
  *
  *   spawning ─▶ idle ──sees you──▶ chase ──in reach──▶ telegraph ─▶ strike ─▶ recover ─┐
- *                                    ▲                                                 │
- *                                    └─────────────────────────────────────────────────┘
+ *                       ▲             │  ▲                                             │
+ *                       └─lost you────┘  └─────────────────────────────────────────────┘
  *
  *   any of the above ──hurt enough──▶ stagger ─▶ chase
  *   any of the above ──killed───────▶ dying ──▶ gone
  *
- * Note what is missing: there is no route from `chase` back to `idle` except the player dying.
- * Once something has noticed you it does not lose interest, and it does not forget where you
- * went when you break line of sight. Losing a pursuer by stepping behind a wall is a stealth
- * mechanic, and this is a game about being cornered.
+ * `chase` is the one phase with a route back to `idle`: lose line of sight for
+ * `LOSE_INTEREST_SECONDS` straight and it gives up, standing down wherever it lost you.
+ * Stepping behind a wall and staying unseen is how a player sheds a pursuer; a hit or a nearby
+ * noise pulse re-alerts it just as fast as the first time. What is deliberately still missing
+ * is anything *softer* than that — no partial memory, no "investigate the last known position".
+ * Seen or not seen, cleanly, is the whole vocabulary.
  *
  * **The telegraph is the whole design.** It is the window in which the player can still do
  * something about being hit — step back, interrupt it, get behind it. An enemy without one is
@@ -52,6 +54,17 @@ export const ARRIVE_RADIUS = 0.45
 
 /** How often a chasing enemy asks for a new route. */
 export const REPATH_SECONDS = 0.6
+
+/**
+ * Seconds a chasing enemy may go without seeing the player before it gives up.
+ *
+ * Counted only while out of sight — a single glimpse resets it to zero — so this is "how long
+ * can you stay hidden", not "how long has the chase run". Long enough that ducking round the
+ * nearest corner for a second does not shake anything (that would make `visible` meaningless),
+ * short enough that a player who actually breaks contact — into the foyer, down a side
+ * passage — is rewarded for it within a few seconds rather than towing a pack to the door.
+ */
+export const LOSE_INTEREST_SECONDS = 5
 
 /** How hard separation pulls against the path. See `blendSteering`. */
 export const SEPARATION_WEIGHT = 0.85
@@ -126,6 +139,10 @@ export function enterPhase(enemy: Enemy, phase: Enemy['phase']): void {
   if (enemy.phase === phase) return
   enemy.phase = phase
   enemy.timer = 0
+  // Every entry into chase — from idle, from stagger, from recover — starts the clock fresh,
+  // so a wind-up that happened to run out of sight doesn't hand the next chase a head start
+  // on giving up.
+  if (phase === 'chase') enemy.sinceSeen = 0
 }
 
 /**
@@ -223,6 +240,20 @@ export function stepEnemyAi(enemy: Enemy, ctx: AiContext, dt: number): AiIntent 
       if (!ctx.playerAlive) {
         enterPhase(enemy, 'idle')
         return IDLE
+      }
+
+      // Give-up clock. Any glimpse resets it; only sustained blindness spends it down.
+      if (ctx.visible) {
+        enemy.sinceSeen = 0
+      } else {
+        enemy.sinceSeen += dt
+        if (enemy.sinceSeen >= LOSE_INTEREST_SECONDS) {
+          enemy.alerted = false
+          enterPhase(enemy, 'idle')
+          enemy.velocity.x = 0
+          enemy.velocity.z = 0
+          return IDLE
+        }
       }
 
       // Close enough, and it can actually see what it is about to swing at. Attacking through

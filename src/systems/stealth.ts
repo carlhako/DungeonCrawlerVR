@@ -15,7 +15,8 @@
  *
  * 2. **Noise pulses** — firing or swinging a weapon emits a pulse that alerts every idle
  *    enemy within WEAPON_NOISE_RADIUS with no line of sight required. Shooting breaks stealth
- *    even from behind cover.
+ *    even from behind cover, but the radius is deliberately short — a fight should wake the
+ *    room you're in, not the whole level.
  *
  * 3. **Safety valve** — after MAX_IDLE_SECONDS, an idle enemy starts hunting regardless of
  *    detection, so a player who camps somewhere no spawn point can ever see still gets found.
@@ -38,9 +39,12 @@ export const QUIET_DETECTION = 0.4
  * How far a weapon's noise pulse reaches, in metres.
  *
  * Alerts every idle enemy within this distance **without line of sight**, the same way
- * `enemy.alerted` works for a landed hit. Shooting breaks stealth even from behind cover.
+ * `enemy.alerted` works for a landed hit. Shooting breaks stealth even from behind cover —
+ * but at 20m one shot woke an entire wing of the level at once, which is what turned every
+ * first contact into the whole pack converging on one corridor. 10m keeps it to "this room
+ * heard that" rather than "this level heard that".
  */
-export const WEAPON_NOISE_RADIUS = 20
+export const WEAPON_NOISE_RADIUS = 10
 
 /**
  * Seconds an idle enemy waits before it starts hunting regardless of detection.

@@ -74,6 +74,11 @@ export interface Enemy {
    * enemy in the game and the correct way to play becomes sniping things that never look up.
    */
   alerted: boolean
+  /**
+   * Seconds since the player was last visible while chasing. Reset the moment it sees you
+   * again. Once this crosses `LOSE_INTEREST_SECONDS` mid-chase, it gives up — see `ai.ts`.
+   */
+  sinceSeen: number
   /** The registry entry. Its `position` is this record's `position`, by reference. */
   readonly target: Damageable
   /** Whether this death has been paid out. One kill, one payout. */
@@ -116,6 +121,7 @@ function createEnemy(slot: number): Enemy {
     path: [],
     pathIndex: 0,
     alerted: false,
+    sinceSeen: 0,
     target,
     counted: false,
     flash: 0,
@@ -165,6 +171,7 @@ export function spawnEnemy(pool: EnemyPool, type: EnemyId, at: Waypoint): Enemy 
   enemy.path.length = 0
   enemy.pathIndex = 0
   enemy.alerted = false
+  enemy.sinceSeen = 0
   enemy.counted = false
   enemy.flash = 0
   enemy.seed = pool.spawned
