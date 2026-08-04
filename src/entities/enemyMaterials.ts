@@ -13,8 +13,9 @@
  * bug.
  */
 
-import { Color, Material, MeshStandardMaterial } from 'three'
+import { Color, Material, Mesh, MeshStandardMaterial, type Object3D } from 'three'
 import type { IUniform } from 'three'
+import type { EnemyDefinition } from '@/data/enemies'
 
 export interface DissolveUniforms {
   uDissolve: IUniform<number>
@@ -124,4 +125,129 @@ export function injectDissolve(material: Material, edge = DISSOLVE_EDGE): Dissol
  */
 export function isTintable(material: Material): material is MeshStandardMaterial {
   return 'emissive' in material && (material as MeshStandardMaterial).emissive instanceof Color
+}
+
+/**
+ * Lifts an FBX→glTF kit's near-black albedo off the floor, by luminance — not by clamping each
+ * channel to a flat value.
+ *
+ * Quaternius' Phong-shaded exports (`extras.fromFBX.isTruePBR: false`) sometimes land at
+ * `baseColorFactor` values under 0.05 — the Skeleton Warrior's `Black` material is
+ * `[0.013, 0.014, 0.013]`, which is indistinguishable from "no light reaches this surface" once
+ * it is lit by nothing but a torch. This is not a bug in the export, a nearly-unlit material is
+ * a legitimate thing to author; it just reads as missing geometry in this game's lighting, and
+ * there is no environment map here to fill it back in.
+ *
+ * The first version of this clamped each channel to the floor independently, which is wrong in
+ * a way that only showed up once a real material was near-black *and coloured*: the Wraith's
+ * `Ghost_Main` is a dark purple, `[0.018, 0.004, 0.023]`, and clamping every channel to the same
+ * floor turned it into flat neutral grey — a material that only differs from the Skeleton's
+ * near-black `Black` by hue lost that hue entirely, on the exact material a future definition
+ * would reach for to prove a tint works on it. Scaling the whole colour up by luminance instead
+ * preserves the channel ratios — the hue — and only raises how bright it reads.
+ */
+const MODEL_ALBEDO_FLOOR = 0.12
+
+/** Rec. 709 luma coefficients — matches the readout in `debug.ts`'s lab luminance. */
+function luminance(color: Color): number {
+  return 0.2126 * color.r + 0.7152 * color.g + 0.0722 * color.b
+}
+
+/**
+ * The kit's own `metallicFactor` (0.4 across every material seen so far) with no environment
+ * map to reflect is a pure diffuse loss — three has nothing to put in the mirror, so a metallic
+ * surface just returns less light than a rough one for no visual benefit. Clamped to 0 until
+ * the day this project gains an envmap, at which point this is the one line to change back.
+ */
+const MODEL_METALNESS = 0
+
+export interface PrepareMaterialsOptions {
+  /**
+   * Overrides `definition.tint` for this call. `undefined` (the default) reads the
+   * definition — pass `null` to force no tint, or an explicit `{ colour, strength }` to force
+   * one, regardless of what the definition says. Exists for the model lab, which needs to show
+   * the same body with and without a hypothetical boss tint side by side.
+   */
+  tint?: EnemyDefinition['tint'] | null
+  /**
+   * Reproduces the Sprint 2.7 bug on purpose: replaces `color` outright instead of multiplying
+   * into it. Exists only so the model lab can show the regression next to the fix — nothing in
+   * the game should ever pass this.
+   */
+  legacyReplace?: boolean
+}
+
+export interface PreparedEnemyMaterials {
+  /** Every prepared material that can be told what colour to glow — the emissive channel. */
+  tints: MeshStandardMaterial[]
+  /** Every prepared material, dissolving. */
+  dissolve: DissolveUniforms[]
+  /** Every cloned material, for disposal. */
+  owned: Material[]
+}
+
+/**
+ * Clones and prepares every material on a cloned kit model for one enemy slot: dissolve
+ * injected, an optional recolour, metalness clamped, near-black albedo lifted.
+ *
+ * The one function both `EnemyShape`'s production path and the model lab call — see the module
+ * doc. `clone` is mutated in place; each mesh's `material` is replaced with owned copies.
+ */
+export function prepareEnemyMaterials(
+  clone: Object3D,
+  definition: EnemyDefinition,
+  options: PrepareMaterialsOptions = {},
+): PreparedEnemyMaterials {
+  const tint = options.tint === undefined ? definition.tint : options.tint
+  const tintColour = tint ? new Color(tint.colour) : null
+  const tintStrength = tint?.strength ?? 1
+
+  const tints: MeshStandardMaterial[] = []
+  const dissolve: DissolveUniforms[] = []
+  const owned: Material[] = []
+
+  clone.traverse((object) => {
+    const mesh = object as Mesh
+    if (!mesh.isMesh) return
+    mesh.castShadow = true
+    mesh.receiveShadow = false
+
+    // Materials are shared by the clone, and every one of the writes below is per-enemy: one
+    // skeleton taking a hit would flash the whole wave white.
+    const source = mesh.material
+    const replace = (material: Material) => {
+      const copy = material.clone()
+      owned.push(copy)
+      dissolve.push(injectDissolve(copy))
+      if (isTintable(copy)) {
+        copy.metalness = MODEL_METALNESS
+        const luma = luminance(copy.color)
+        if (luma > 0 && luma < MODEL_ALBEDO_FLOOR) {
+          copy.color.multiplyScalar(MODEL_ALBEDO_FLOOR / luma)
+        } else if (luma === 0) {
+          // True black has no hue to preserve — nothing to scale.
+          copy.color.setScalar(MODEL_ALBEDO_FLOOR)
+        }
+
+        if (tintColour) {
+          if (options.legacyReplace) {
+            // The Sprint 2.7 bug, kept reachable on purpose — see `PrepareMaterialsOptions`.
+            copy.color.copy(tintColour)
+          } else {
+            // Multiplies into the kit's own colour rather than replacing it, so a material with
+            // no `map` — the Demon and the Ghost Skull both ship none — keeps its own baked
+            // shading and only shifts hue. `lerp` toward the product so `strength` can be a
+            // nudge: at 0 the kit colour is untouched, at 1 it is fully multiplied.
+            const multiplied = copy.color.clone().multiply(tintColour)
+            copy.color.lerp(multiplied, tintStrength)
+          }
+        }
+        tints.push(copy)
+      }
+      return copy
+    }
+    mesh.material = Array.isArray(source) ? source.map(replace) : replace(source)
+  })
+
+  return { tints, dissolve, owned }
 }

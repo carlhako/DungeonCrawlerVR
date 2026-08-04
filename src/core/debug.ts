@@ -14,10 +14,12 @@ import type { WeaponId } from '@/data/weapons'
 import { combatSnapshot } from '@/systems/combat/state'
 import { applyDamage, damageables, publishDamage } from '@/systems/combat/targets'
 import { enemyPool, enemySnapshot } from '@/systems/enemies/state'
-import { enemyModelSnapshot } from '@/systems/enemies/models'
+import { enemyModelSnapshot, getEnemyModel } from '@/systems/enemies/models'
 import { wallTextureSnapshot } from '@/systems/environment/textures'
 import { fxSnapshot } from '@/systems/fx/state'
 import { playerVitals } from '@/systems/vitals'
+import { LAB_BACKGROUND_RGB, labGridLayout } from '@/scenes/ModelLab'
+import type { Material, MeshStandardMaterial } from 'three'
 
 /**
  * Dev-only handle onto the running game, hung off `window.__DCVR__`.
@@ -190,6 +192,42 @@ export interface DebugHandle {
    */
   readonly textures: ReturnType<typeof wallTextureSnapshot>
   /**
+   * The model lab's own readout — see `scenes/ModelLab.tsx`.
+   *
+   * `ready` is settled once every enemy with a model spec has either loaded or given up, the
+   * same instant the lab's specimens stop being capsule-shaped placeholders. `materials` is the
+   * *raw* GLB data, read straight off the loaded templates before anything in this game's
+   * pipeline touches it — the ground truth the fix is judged against. `luminance` is a method,
+   * not a property: it reads back the actual framebuffer and is only worth paying for on
+   * demand, from the capture script, once a frame has actually drawn the lab's grid.
+   */
+  readonly lab: {
+    readonly ready: boolean
+    readonly materials: Record<
+      string,
+      Array<{
+        name: string
+        color: string
+        map: boolean
+        metalness: number
+        roughness: number
+        emissive: string
+        emissiveIntensity: number
+      }>
+    >
+    /** Keyed `"<enemyId>:<variant>"`, matching `labGridLayout()`'s cols × rows. */
+    luminance(): Record<
+      string,
+      { mean: number; brightFraction: number; coverage: number }
+    > | null
+    /**
+     * Every specimen's pixel rectangle, in device pixels relative to the canvas. What the
+     * capture script uses to crop one screenshot into one PNG per cell, instead of re-deriving
+     * the grid geometry itself.
+     */
+    cellRects(): Array<{ id: string; variant: string; x: number; y: number; w: number; h: number }> | null
+  }
+  /**
    * Kill everything currently standing, through the real damage path.
    *
    * Scaffolding for the smoke test, and narrowly scoped on purpose: it does not clear the
@@ -221,6 +259,110 @@ export function setDebugView(scene: Scene | null, gl: WebGLRenderer | null): voi
   if (!import.meta.env.DEV) return
   view.scene = scene
   view.gl = gl
+}
+
+/**
+ * Every cell's pixel rectangle in the current framebuffer, in device pixels relative to the
+ * canvas. Shared by the luminance readout and the capture script, which crops individual
+ * specimens out of one screenshot rather than re-deriving this geometry itself.
+ */
+function labCellRects(): Array<{ id: string; variant: string; x: number; y: number; w: number; h: number }> | null {
+  if (!view.gl) return null
+  const canvas = view.gl.domElement
+  const width = canvas.width
+  const height = canvas.height
+  if (!width || !height) return null
+
+  const layout = labGridLayout()
+  const { left, right, top, bottom } = layout.frustum
+  const rects: Array<{ id: string; variant: string; x: number; y: number; w: number; h: number }> = []
+
+  layout.rows.forEach((variant, r) => {
+    layout.cols.forEach((id, c) => {
+      // World-space cell bounds, matching how `ModelLab` places each specimen's column and
+      // row band — see `labGridLayout`'s doc comment for why this maps linearly onto pixels.
+      const wx0 = c * layout.cellW
+      const wx1 = wx0 + layout.cellW
+      const wy1 = -(r * layout.cellH)
+      const wy0 = wy1 - layout.cellH
+
+      const px0 = Math.max(0, Math.round(((wx0 - left) / (right - left)) * width))
+      const px1 = Math.min(width, Math.round(((wx1 - left) / (right - left)) * width))
+      const py0 = Math.max(0, Math.round(((top - wy1) / (top - bottom)) * height))
+      const py1 = Math.min(height, Math.round(((top - wy0) / (top - bottom)) * height))
+      rects.push({ id, variant, x: px0, y: py0, w: Math.max(1, px1 - px0), h: Math.max(1, py1 - py0) })
+    })
+  })
+  return rects
+}
+
+/** How far a pixel must sit from the lab's flat background colour, per channel (0..255), to
+ *  count as part of the specimen rather than empty cell. */
+const LAB_FOREGROUND_THRESHOLD = 14
+
+/**
+ * Reads the framebuffer back and measures mean luminance and the fraction of near-white
+ * pixels, per cell of the model lab's grid — over the specimen's own pixels only.
+ *
+ * A mean taken over the whole cell is mostly the lab's flat background (most of a cell is
+ * empty air around a body), which dilutes exactly the signal this exists to catch: a body that
+ * is itself washed out reads only slightly brighter than average once diluted by the space
+ * around it. Foreground is "far enough from the known background colour" — see
+ * `LAB_BACKGROUND_RGB` — which is cheap and reliable here because the lab's background is a
+ * single flat, unlit colour with no gradient or fog to be confused with a pale body.
+ *
+ * The whole point of the lab: "mostly white" becomes a number that can be regressed on, rather
+ * than something only a human judges from a PNG. Requires `preserveDrawingBuffer` — see
+ * `App.tsx`, where it is turned on only for `?scene=models` — because without it the drawing
+ * buffer is only readable from inside the `requestAnimationFrame` callback that produced it,
+ * and this is called from outside that callback, on demand, by the capture script.
+ */
+function computeLabLuminance(): Record<
+  string,
+  { mean: number; brightFraction: number; coverage: number }
+> | null {
+  const rects = labCellRects()
+  if (!rects || !view.gl) return null
+  const canvas = view.gl.domElement
+
+  const scratch = document.createElement('canvas')
+  scratch.width = canvas.width
+  scratch.height = canvas.height
+  const ctx = scratch.getContext('2d')
+  if (!ctx) return null
+  ctx.drawImage(canvas, 0, 0)
+
+  const [bgR, bgG, bgB] = LAB_BACKGROUND_RGB
+  const out: Record<string, { mean: number; brightFraction: number; coverage: number }> = {}
+  for (const rect of rects) {
+    const data = ctx.getImageData(rect.x, rect.y, rect.w, rect.h).data
+    let sum = 0
+    let bright = 0
+    let foreground = 0
+    const total = rect.w * rect.h
+    for (let i = 0; i < data.length; i += 4) {
+      const r = data[i]!
+      const g = data[i + 1]!
+      const b = data[i + 2]!
+      const isBackground =
+        Math.abs(r - bgR) < LAB_FOREGROUND_THRESHOLD &&
+        Math.abs(g - bgG) < LAB_FOREGROUND_THRESHOLD &&
+        Math.abs(b - bgB) < LAB_FOREGROUND_THRESHOLD
+      if (isBackground) continue
+      foreground++
+      // Rec. 709 luma. Good enough for "is this near-white" — this is a diagnostic, not a
+      // colour-managed pipeline.
+      const lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255
+      sum += lum
+      if (lum > 0.9) bright++
+    }
+    out[`${rect.id}:${rect.variant}`] = {
+      mean: foreground > 0 ? +(sum / foreground).toFixed(3) : 0,
+      brightFraction: foreground > 0 ? +(bright / foreground).toFixed(3) : 0,
+      coverage: +(foreground / total).toFixed(3),
+    }
+  }
+  return out
 }
 
 export function installDebugHandle(): void {
@@ -332,6 +474,38 @@ export function installDebugHandle(): void {
     },
     get textures() {
       return wallTextureSnapshot()
+    },
+    get lab() {
+      const statuses = enemyModelSnapshot()
+      const ready = Object.values(statuses).every(
+        (entry) => entry.status === 'ready' || entry.status === 'missing',
+      )
+
+      const layout = labGridLayout()
+      const materials: DebugHandle['lab']['materials'] = {}
+      for (const id of layout.cols) {
+        const list: DebugHandle['lab']['materials'][string] = []
+        const model = getEnemyModel(id)
+        model?.template.traverse((object) => {
+          const mesh = object as unknown as { isMesh?: boolean; material?: Material | Material[] }
+          if (!mesh.isMesh || !mesh.material) return
+          for (const material of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
+            const std = material as MeshStandardMaterial
+            list.push({
+              name: material.name || '(unnamed)',
+              color: std.color ? `#${std.color.getHexString()}` : '',
+              map: Boolean(std.map),
+              metalness: std.metalness ?? 0,
+              roughness: std.roughness ?? 0,
+              emissive: std.emissive ? `#${std.emissive.getHexString()}` : '',
+              emissiveIntensity: std.emissiveIntensity ?? 0,
+            })
+          }
+        })
+        materials[id] = list
+      }
+
+      return { ready, materials, luminance: computeLabLuminance, cellRects: labCellRects }
     },
     slay: () => {
       let killed = 0

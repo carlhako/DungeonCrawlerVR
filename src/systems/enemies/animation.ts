@@ -229,6 +229,25 @@ export function modelScale(sourceHeight: number, targetHeight: number): number {
   return targetHeight / sourceHeight
 }
 
+/**
+ * Scale and vertical offset to stand a loaded model's clone at `targetHeight` with its feet on
+ * the group origin.
+ *
+ * `measuredHeight`/`measuredMinY` come from `Box3.setFromObject` on the template at load —
+ * the model's *actual* bind-pose bounds, not the hand-entered `sourceHeight` a kit's own scale
+ * might disagree with. `yOffset` is the spec's own nudge (e.g. the Wraith's float) and is
+ * applied on top, in the target's scale, after the feet are already on the floor.
+ */
+export function fitModel(
+  measuredHeight: number,
+  measuredMinY: number,
+  targetHeight: number,
+  yOffset = 0,
+): { scale: number; y: number } {
+  const scale = modelScale(measuredHeight, targetHeight)
+  return { scale, y: yOffset - measuredMinY * scale }
+}
+
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value))
 }

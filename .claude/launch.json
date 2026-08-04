@@ -12,6 +12,12 @@
       "runtimeExecutable": "npx",
       "runtimeArgs": ["vite", "--port", "5174", "--strictPort"],
       "port": 5174
+    },
+    {
+      "name": "dev-verify2",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["vite", "--port", "5176", "--strictPort"],
+      "port": 5176
     }
   ]
 }

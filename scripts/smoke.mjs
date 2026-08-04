@@ -713,7 +713,7 @@ await page
   .waitForFunction(() => window.__DCVR__?.run.phase === 'wave', { timeout: 12000 })
   .catch(() => {})
 
-// In far enough to be found, then stand still and let something reach us.
+// In far enough to be found, then let something reach us.
 await walkUntil(['KeyW'], (p) => p.z < -16, 25)
 await page
   .waitForFunction(() => (window.__DCVR__?.enemies.living ?? 0) > 0, { timeout: 40000 })
@@ -721,13 +721,28 @@ await page
 
 death.hpBeforeAnyHit = (await readEnemies())?.hp ?? null
 
-// Wait for one to actually hurt us — which is the check that an enemy's strike reaches the
-// player's health at all, and not through any back door.
+/**
+ * Wait for one to actually hurt us — which is the check that an enemy's strike reaches the
+ * player's health at all, and not through any back door.
+ *
+ * Standing dead still is the one thing the stealth system exists to reward: it halves the
+ * aggro radius (`QUIET_DETECTION`) and never emits a noise pulse, which a real player being
+ * hunted does not do. So this walks toward whatever is nearest instead — enough movement to
+ * be noticed at full range and to close into its attack range — but it never fires. Firing
+ * killed the enemy before it ever swung back (the wand outdamages a Skulker's own health in
+ * a couple of bursts), which cleared the wave early and made every assertion after this one
+ * about the wrong wave. Getting struck needs proximity, not a weapon.
+ */
 const hurtDeadline = Date.now() + 60000
 while (Date.now() < hurtDeadline) {
   const now = await readEnemies()
   if (now && now.hp < now.maxHp) break
-  await page.waitForTimeout(300)
+
+  const at = await nearestEnemy()
+  if (at) await page.evaluate((e) => window.__DCVR__.lookAt(e.x, e.y, e.z), at)
+  await page.keyboard.down('KeyW')
+  await page.waitForTimeout(400)
+  await page.keyboard.up('KeyW')
 }
 death.hpAfterBeingHit = (await readEnemies())?.hp ?? null
 

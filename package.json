@@ -12,6 +12,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "smoke": "node scripts/smoke.mjs",
+    "capture:models": "node scripts/captureModels.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

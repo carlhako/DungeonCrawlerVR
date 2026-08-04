@@ -11,6 +11,7 @@ import { xrStore } from '@/core/xr'
 import { Dungeon } from '@/scenes/Dungeon'
 import { Foyer } from '@/scenes/Foyer'
 import { GreyboxRoom } from '@/scenes/GreyboxRoom'
+import { LAB_BACKGROUND_CSS, ModelLab } from '@/scenes/ModelLab'
 import { XRDiagnostics } from '@/scenes/XRDiagnostics'
 import { CombatDriver } from '@/systems/CombatDriver'
 import { EnemyDriver } from '@/systems/EnemyDriver'
@@ -45,15 +46,16 @@ import { VRButton } from '@/ui/VRButton'
 import { DesktopHint } from '@/ui/DesktopHint'
 
 /**
- * Which room to load. The foyer is the game; the greybox is the movement test rig.
+ * Which room to load. The foyer is the game; the greybox is the movement test rig; the model
+ * lab is neither a room nor gameplay — it's the enemy roster laid out for inspection.
  *
- * Kept rather than deleted, and reachable at `?scene=greybox`, because it is the only place
- * with a staircase, a ramp and a ledge to walk at — the character controller's behaviour is
- * invisible without them, and the smoke test still drives it.
+ * Kept rather than deleted, and reachable at `?scene=greybox` or `?scene=models`, because they
+ * are each the only place to see something: the greybox is the only staircase, ramp and ledge
+ * to test the character controller against, and the lab is the only place a kit model can be
+ * looked at under the game's own lighting before it reaches a headset.
  */
-const scene = new URLSearchParams(window.location.search).get('scene') === 'greybox'
-  ? 'greybox'
-  : 'foyer'
+const sceneParam = new URLSearchParams(window.location.search).get('scene')
+const scene = sceneParam === 'greybox' ? 'greybox' : sceneParam === 'models' ? 'models' : 'foyer'
 
 function SceneLighting() {
   const { ambient, keyIntensity, keyHeight } = useLightingControls()
@@ -138,7 +140,15 @@ export function App() {
         shadows
         // Physically-correct-ish defaults. Tone mapping matters a lot once the game is lit
         // only by torches — without it, bright flames blow out to flat white.
-        gl={{ antialias: true, powerPreference: 'high-performance' }}
+        gl={{
+          antialias: true,
+          powerPreference: 'high-performance',
+          // Only the lab needs this: reading the drawing buffer back for the luminance
+          // readout requires it to survive past the frame that drew it, which costs a copy
+          // the game itself never asks for. Scoped to `?scene=models` so the cost never
+          // reaches a headset.
+          preserveDrawingBuffer: scene === 'models',
+        }}
         onCreated={({ gl }) => {
           gl.toneMapping = ACESFilmicToneMapping
           gl.toneMappingExposure = 1.0
@@ -152,20 +162,36 @@ export function App() {
           <DesktopInputSampler />
           <XRRenderSettings />
 
-          <color attach="background" args={['#0b0b10']} />
-          {/* Loose while greyboxing so the whole room reads. The dungeon pulls this in hard
-              (Sprint 3.1) — tight fog is most of what makes the torch-lit rooms frightening. */}
-          <fog attach="fog" args={['#0b0b10', 20, 70]} />
+          {scene === 'models' ? (
+            // Neutral grey, no fog — nothing but the models and the lab's own lights should
+            // land on a pixel here, or the luminance readout the capture script takes is
+            // measuring the room instead of the specimen.
+            <color attach="background" args={[LAB_BACKGROUND_CSS]} />
+          ) : (
+            <>
+              <color attach="background" args={['#0b0b10']} />
+              {/* Loose while greyboxing so the whole room reads. The dungeon pulls this in
+                  hard (Sprint 3.1) — tight fog is most of what makes the torch-lit rooms
+                  frightening. */}
+              <fog attach="fog" args={['#0b0b10', 20, 70]} />
+            </>
+          )}
 
           <Suspense fallback={null}>
-            <World />
+            {/* No <Physics>, no player rig, no drivers — the lab draws models, nothing plays. */}
+            {scene === 'models' ? <ModelLab /> : <World />}
           </Suspense>
 
-          {/* Outside <Physics>: they follow the head, not a rigid body. */}
-          <ComfortVignette />
-          <EnemyCounter />
-          <ExploredMap />
-          <ExploredDriver />
+          {/* Outside <Physics>: they follow the head, not a rigid body. Skipped in the lab —
+              there is no run, no dungeon and no player for any of these to describe. */}
+          {scene !== 'models' && (
+            <>
+              <ComfortVignette />
+              <EnemyCounter />
+              <ExploredMap />
+              <ExploredDriver />
+            </>
+          )}
           <DevPerf visible={showPerf} />
         </XR>
       </Canvas>

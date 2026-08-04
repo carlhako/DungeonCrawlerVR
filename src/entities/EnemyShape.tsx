@@ -7,7 +7,6 @@ import {
   Group,
   LoopOnce,
   LoopRepeat,
-  Mesh,
   MeshStandardMaterial,
   type AnimationAction,
   type AnimationClip,
@@ -21,10 +20,14 @@ import {
   resolveAppearance,
   type EnemyAppearance,
 } from '@/systems/enemies/appearance'
-import { clipTimeScale, modelScale, planClip, selectClip } from '@/systems/enemies/animation'
+import { clipTimeScale, fitModel, planClip, selectClip } from '@/systems/enemies/animation'
 import { cloneEnemyModel, getEnemyModel, subscribeEnemyModels } from '@/systems/enemies/models'
 import type { Enemy } from '@/systems/enemies/pool'
-import { injectDissolve, isTintable, type DissolveUniforms } from '@/entities/enemyMaterials'
+import {
+  injectDissolve,
+  prepareEnemyMaterials,
+  type DissolveUniforms,
+} from '@/entities/enemyMaterials'
 
 /**
  * What an enemy is drawn as.
@@ -51,9 +54,6 @@ import { injectDissolve, isTintable, type DissolveUniforms } from '@/entities/en
 
 /** The height the primitive body is modelled at, before it is scaled to the type in the slot. */
 const NOMINAL_HEIGHT = 1.8
-
-/** Uniform shrink applied to every kit model on top of the height correction. See `buildInstance`. */
-const MODEL_SCALE_FUDGE = 0.6
 
 /** How fast the walk bob cycles per metre per second of travel. */
 const BOB_RATE = 5
@@ -385,44 +385,23 @@ function buildInstance(id: EnemyId): ModelInstance | null {
 
   // A kit's own scale is an accident of whoever exported it; the definition's height is what
   // every readability decision in the game was tuned against, including "a Skulker is small".
-  // The CC0 pack's rigs still read oversized once normalised to that height, so every model gets
-  // knocked down to 60% on top of the height correction.
-  clone.scale.setScalar(modelScale(spec.sourceHeight, definition.height) * MODEL_SCALE_FUDGE)
-  clone.position.y = spec.yOffset ?? 0
+  // `fitModel` scales from the template's own measured bounds, not the declared `sourceHeight`,
+  // and lands the feet on the group origin — see `models.ts`.
+  const fit = fitModel(model.measuredHeight, model.measuredMinY, definition.height, spec.yOffset)
+  clone.scale.setScalar(fit.scale)
+  clone.position.y = fit.y
   clone.rotation.y = spec.yawOffset ?? 0
 
-  const tints: MeshStandardMaterial[] = []
-  const dissolve: DissolveUniforms[] = []
-  const owned: Material[] = []
-
-  clone.traverse((object) => {
-    const mesh = object as Mesh
-    if (!mesh.isMesh) return
-    mesh.castShadow = true
-    mesh.receiveShadow = false
-
-    // Materials are shared by the clone, and every one of the writes below is per-enemy: one
-    // skeleton taking a hit would flash the whole wave white.
-    const source = mesh.material
-    const replace = (material: Material) => {
-      const copy = material.clone()
-      owned.push(copy)
-      dissolve.push(injectDissolve(copy))
-      if (isTintable(copy)) {
-        // The kit's own diffuse stays on the material — that is the whole reason to import a
-        // model rather than draw a capsule — but several of these assets (a Demon/Yeti cast as
-        // the Skeleton Warrior, a Ghost/Ghost Skull as the Wraith) ship pale enough that the
-        // result reads as washed-out white regardless of how the emissive glow is tuned.
-        // Emissive is additive light on top of the texture; it cannot put colour into a diffuse
-        // that never had any. Tinting `color` multiplies onto the map instead of replacing it,
-        // so the texture's own shading survives while the hue matches the definition.
-        copy.color.set(definition.colour)
-        tints.push(copy)
-      }
-      return copy
-    }
-    mesh.material = Array.isArray(source) ? source.map(replace) : replace(source)
-  })
+  // The kit's own diffuse stays on the model by default — that is the whole reason to import
+  // one rather than draw a capsule. Sprint 2.7's first pass painted `definition.colour` over
+  // every material unconditionally and read as pure white on the two kit assets that ship no
+  // texture (a Demon cast as the Skeleton Warrior, a Ghost Skull as the Wraith): replacing an
+  // untextured material's colour outright collapses several distinct baked colours into one
+  // flat tint, and a flat light tint under a torch saturates straight to white. Recolouring is
+  // now `definition.tint`, opt-in per definition and multiplied rather than substituted — see
+  // `enemyMaterials.ts` — for the elites and bosses that are meant to be a palette shift on a
+  // base creature. None of today's three set it, so all three keep the kit's own colours.
+  const { tints, dissolve, owned } = prepareEnemyMaterials(clone, definition)
 
   const root = new Group()
   root.visible = false

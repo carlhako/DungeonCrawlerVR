@@ -145,6 +145,54 @@ describe('sweepDamageables', () => {
     expect(sweepDamageables([outside], point, point)).toBeNull()
     expect(sweepDamageables([inside], point, point)?.target).toBe(inside)
   })
+
+  describe('a capsule target (halfHeight set)', () => {
+    // A 1.2 m-tall body: position at the capsule's vertical centre (0.6), radius 0.3,
+    // halfHeight 0.3 — capsule spans floor (y=0.3-0.3=0... plus radius, so ~0) to head (~1.2).
+    function capsule(id: string, x: number, y: number, z: number): Damageable {
+      return { ...dummy(id, x, y, z, 0.3), halfHeight: 0.3 }
+    }
+
+    it('hits at head height, not just at the recorded centre', () => {
+      const target = capsule('a', 0, 0.6, -5)
+      const hit = sweepDamageables(
+        [target],
+        { x: 0, y: 1.15, z: 0 },
+        { x: 0, y: 1.15, z: -10 },
+      )
+      expect(hit?.target).toBe(target)
+    })
+
+    it('hits near the feet too', () => {
+      const target = capsule('a', 0, 0.6, -5)
+      const hit = sweepDamageables([target], { x: 0, y: 0.05, z: 0 }, { x: 0, y: 0.05, z: -10 })
+      expect(hit?.target).toBe(target)
+    })
+
+    it('misses above the top of the capsule', () => {
+      const target = capsule('a', 0, 0.6, -5)
+      expect(
+        sweepDamageables([target], { x: 0, y: 2, z: 0 }, { x: 0, y: 2, z: -10 }),
+      ).toBeNull()
+    })
+
+    it('misses beside the body, outside the radius', () => {
+      const target = capsule('a', 0, 0.6, -5)
+      expect(
+        sweepDamageables([target], { x: 1, y: 0.6, z: 0 }, { x: 1, y: 0.6, z: -10 }),
+      ).toBeNull()
+    })
+
+    it('a target with no halfHeight stays a plain sphere', () => {
+      const target = dummy('a', 0, 0.6, -5, 0.3)
+      const hit = sweepDamageables(
+        [target],
+        { x: 0, y: 1.15, z: 0 },
+        { x: 0, y: 1.15, z: -10 },
+      )
+      expect(hit).toBeNull()
+    })
+  })
 })
 
 describe('applyDamage', () => {

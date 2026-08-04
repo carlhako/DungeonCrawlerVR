@@ -18,7 +18,7 @@
  * once and infinitely better than a loading screen in a headset.
  */
 
-import { AnimationClip, Group } from 'three'
+import { AnimationClip, Box3, Group } from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import { ENEMIES, ENEMY_IDS, type EnemyId, type EnemyModelSpec } from '@/data/enemies'
@@ -35,6 +35,14 @@ export interface LoadedEnemyModel {
   clips: AnimationClip[]
   /** Clip names, for `selectClip`. Kept flat because that is all the matcher wants. */
   clipNames: string[]
+  /**
+   * The template's own bind-pose bounds, measured once at load rather than trusted from
+   * `spec.sourceHeight`. `buildInstance` (`EnemyShape.tsx`) scales by this instead, so the
+   * drawn model is the height the definition claims even when the declared `sourceHeight` is
+   * wrong — which the shipped kit's own numbers are.
+   */
+  measuredHeight: number
+  measuredMinY: number
 }
 
 interface Entry {
@@ -120,11 +128,18 @@ async function loadOne(id: EnemyId, spec: EnemyModelSpec): Promise<void> {
     // template is meaningless, and matrix auto-update on it is work nobody sees.
     template.updateMatrixWorld(true)
 
+    // Bind-pose bounds. Good enough to correct a wrong `sourceHeight` — the alternative is
+    // trusting a number nobody here measured against the actual file.
+    const bounds = new Box3().setFromObject(template)
+    const measuredHeight = bounds.max.y - bounds.min.y
+
     entry.model = {
       spec,
       template,
       clips: gltf.animations,
       clipNames: gltf.animations.map((clip) => clip.name),
+      measuredHeight: Number.isFinite(measuredHeight) && measuredHeight > 0 ? measuredHeight : spec.sourceHeight,
+      measuredMinY: Number.isFinite(bounds.min.y) ? bounds.min.y : 0,
     }
     entry.status = 'ready'
     entry.error = null

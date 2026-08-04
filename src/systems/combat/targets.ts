@@ -26,8 +26,15 @@ export interface Damageable {
    * needs no re-registration — which is the whole of what Sprint 2.3 needs from this.
    */
   position: Vec3
-  /** Hit sphere. Generous rather than exact: a near miss that reads as a hit is worse. */
+  /** Hit sphere/capsule radius. Generous rather than exact: a near miss that reads as a hit is worse. */
   radius: number
+  /**
+   * Half the length of the hit volume's vertical axis, above and below `position`. Absent or
+   * zero keeps the hit volume a sphere — training dummies and anything else that doesn't set
+   * it are unaffected. Set on enemies so the whole visible body is hittable, not just a sphere
+   * at chest height. See `sweepDamageables`.
+   */
+  halfHeight?: number
   hp: number
   maxHp: number
   resistances?: Resistances
@@ -109,6 +116,35 @@ export function sweepDamageables(
     if (skip?.has(target.id)) continue
 
     const r = target.radius + radius
+
+    if (target.halfHeight && target.halfHeight > 0) {
+      // A vertical capsule: the whole body, not a ball at chest height. Closest distance
+      // between the attack segment and the capsule's own vertical axis, which is exact for
+      // capsule-vs-swept-sphere the same way it is for capsule-vs-capsule — a capsule is the
+      // Minkowski sum of a segment and a sphere, so two capsules intersect iff their core
+      // segments come within the sum of their radii.
+      const hit = closestOnSegments(
+        from,
+        dx,
+        dy,
+        dz,
+        target.position.x,
+        target.position.y - target.halfHeight,
+        target.position.z,
+        0,
+        target.halfHeight * 2,
+        0,
+      )
+      if (hit.distSq > r * r) continue
+      if (best && hit.t >= best.t) continue
+      best = {
+        target,
+        t: hit.t,
+        point: { x: from.x + dx * hit.t, y: from.y + dy * hit.t, z: from.z + dz * hit.t },
+      }
+      continue
+    }
+
     const ox = from.x - target.position.x
     const oy = from.y - target.position.y
     const oz = from.z - target.position.z
@@ -139,6 +175,79 @@ export function sweepDamageables(
   }
 
   return best
+}
+
+/**
+ * Closest distance between segment `p1 + t*d1` (`t` in [0,1], `d1` given as `dx1,dy1,dz1`) and
+ * segment `p2 + s*d2` (`s` in [0,1], `d2` given as `dx2,dy2,dz2`). Returns `t`, the parameter
+ * on the *first* segment (the attack), since that is the ordering `sweepDamageables` needs.
+ *
+ * The standard two-segment closest-point algorithm (Ericson, *Real-Time Collision Detection*
+ * §5.1.9), specialised to nothing — `d2` happens to always be vertical here (a capsule's axis)
+ * but the general form costs nothing extra and needs no separate proof. No allocations: this
+ * runs inside the fixed loop for every live projectile and melee swing every step.
+ */
+function closestOnSegments(
+  p1: Vec3,
+  dx1: number,
+  dy1: number,
+  dz1: number,
+  p2x: number,
+  p2y: number,
+  p2z: number,
+  dx2: number,
+  dy2: number,
+  dz2: number,
+): { t: number; distSq: number } {
+  const EPS = 1e-9
+  const rx = p1.x - p2x
+  const ry = p1.y - p2y
+  const rz = p1.z - p2z
+
+  const a = dx1 * dx1 + dy1 * dy1 + dz1 * dz1
+  const e = dx2 * dx2 + dy2 * dy2 + dz2 * dz2
+  const f = dx2 * rx + dy2 * ry + dz2 * rz
+
+  // `sAttack` walks segment 1 (`p1`, the attack), `sAxis` walks segment 2 (`p2`, the capsule
+  // axis) — Ericson's own naming swaps `s`/`t` between the two segments, which reads as a typo
+  // if not called out.
+  let sAttack: number
+  let sAxis: number
+
+  if (a <= EPS && e <= EPS) {
+    sAttack = 0
+    sAxis = 0
+  } else if (a <= EPS) {
+    sAttack = 0
+    sAxis = clamp01(f / e)
+  } else {
+    const c = dx1 * rx + dy1 * ry + dz1 * rz
+    if (e <= EPS) {
+      sAxis = 0
+      sAttack = clamp01(-c / a)
+    } else {
+      const b = dx1 * dx2 + dy1 * dy2 + dz1 * dz2
+      const denom = a * e - b * b
+      sAttack = denom > EPS ? clamp01((b * f - c * e) / denom) : 0
+      sAxis = (b * sAttack + f) / e
+      if (sAxis < 0) {
+        sAxis = 0
+        sAttack = clamp01(-c / a)
+      } else if (sAxis > 1) {
+        sAxis = 1
+        sAttack = clamp01((b - c) / a)
+      }
+    }
+  }
+
+  const cx = p1.x + dx1 * sAttack - (p2x + dx2 * sAxis)
+  const cy = p1.y + dy1 * sAttack - (p2y + dy2 * sAxis)
+  const cz = p1.z + dz1 * sAttack - (p2z + dz2 * sAxis)
+  return { t: sAttack, distSq: cx * cx + cy * cy + cz * cz }
+}
+
+function clamp01(value: number): number {
+  return value < 0 ? 0 : value > 1 ? 1 : value
 }
 
 /**

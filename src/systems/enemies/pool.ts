@@ -195,6 +195,9 @@ export function spawnEnemy(pool: EnemyPool, type: EnemyId, at: Waypoint): Enemy 
   enemy.retreatDone = false
 
   enemy.target.radius = definition.radius
+  // The capsule spans exactly floor to `definition.height` at `definition.radius` thick, so
+  // head, torso and legs are all hittable — no wider than the enemy already is for steering.
+  enemy.target.halfHeight = Math.max(0, definition.height / 2 - definition.radius)
   enemy.target.hp = definition.hp
   enemy.target.maxHp = definition.hp
   enemy.target.resistances = definition.resistances

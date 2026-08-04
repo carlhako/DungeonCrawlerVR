@@ -1373,6 +1373,72 @@ Found while verifying, and worth recording:
   not art and is not a fallback; `public/models/*.glb` is gitignored, so using it leaves nothing
   behind.
 
+### 2.7 — follow-up: two of three models were reading as pure white
+
+Reported from desktop once the Quaternius pack landed: the Skeleton Warrior and the Wraith read
+as near-white blobs; the Goblin Skulker didn't. A follow-up session had already tried tinting
+the model's diffuse to fix it and made it worse — that commit's own message recorded the tint
+"still reads as pure white and needs another pass".
+
+- **The cause was a silent assumption that broke on two of the three models.** The tint wrote
+  `copy.color.set(definition.colour)` on every tintable material, on the belief that this
+  "multiplies onto the map instead of replacing it" (the previous log entry's own words). Reading
+  the GLBs' JSON chunks directly showed that was true for exactly one enemy: `goblin-skulker.glb`
+  has a real atlas texture, but `skeleton-warrior.glb` (a renamed `Demon.glb`) and `wraith.glb` (a
+  renamed `Ghost Skull.glb`) ship **no texture at all** — their colour lives entirely in each
+  material's `baseColorFactor`. `color.set` on a material with no map doesn't multiply anything,
+  it *replaces* — collapsing the Demon's four distinct baked colours into one flat tan and the
+  Ghost Skull's two into one flat pale blue. A flat, fairly light tint under a torch
+  (`TORCH_INTENSITY 24`, `decay 2`) and ACES tone mapping saturates straight to white. The Goblin
+  escaped only because it had a texture to multiply against — exactly the 2-of-3 split reported.
+- **Recolouring is now opt-in per definition, not automatic.** `EnemyDefinition['tint']`
+  (`data/enemies.ts`) is `{ colour, strength? }`, absent by default — all three current
+  definitions leave it unset, so each model keeps the colour the artist shipped: the Demon-cast
+  Skeleton Warrior reads dark red, the Ghost-Skull-cast Wraith reads dark purple. When a future
+  boss or elite does set it, `prepareEnemyMaterials` (`entities/enemyMaterials.ts`, pulled out of
+  `EnemyShape.tsx`'s `buildInstance` so the model lab can call the identical function) multiplies
+  it into the material's existing colour rather than replacing it — the actual fix, and the one
+  thing that has to hold for the tint to ever be usable on an untextured material again.
+- **The albedo floor and the metalness clamp are new, and both matter more than they look.**
+  Quaternius' Phong→glTF export carries `metallicFactor: 0.4` on every material with no
+  environment map anywhere in this project to reflect — pure diffuse loss for nothing, now
+  clamped to 0. Several materials (the Skeleton's `Black`, the Wraith's `Ghost_Main`) are
+  near-unlit on purpose in the source file, `[0.013, 0.014, 0.013]`-order values that read as
+  missing geometry under torchlight with nothing to fill the shadow back in. The lift is by
+  **luminance**, not by clamping each channel to a floor — the first version of this clamped
+  channels independently and turned the Wraith's near-black *purple* into neutral grey, since a
+  colour that is dark in every channel has no room left to show hue once each one is floored to
+  the same value. Scaling the whole colour up by how dim it reads keeps the ratio between
+  channels — the hue — intact.
+- **The resting emissive glow came down close to zero for all three.** `definition.glow` was
+  originally tuned mostly to fight the diffuse-replacement bug rather than to serve its actual
+  job (visibility between torches), and even a small value re-applied a flat wash on top of
+  whatever the diffuse fix bought back. It stays a per-definition knob — a boss that should
+  glow at rest can still set it — rather than being special-cased out of the resolver, since
+  `resolveAppearance` is deliberately one function both the primitive and the model body consume.
+- **Built a way to look at a kit model before it reaches a headset.** `?scene=models` —
+  `src/scenes/ModelLab.tsx` — lays out all three enemies × five material variants (the raw GLB,
+  today's fixed pipeline, the bug reproduced on purpose, a synthetic boss tint, and the pipeline
+  with emissive zeroed) side by side, lit by the game's actual torch constants. `__DCVR__.lab`
+  exposes the raw per-material GLB data and a per-cell luminance readout, and
+  `scripts/captureModels.mjs` drives it headlessly the same way `smoke.mjs` drives the game,
+  writing screenshots and `artifacts/models-report.json`. Building this caught a second bug on
+  its own: the lab's per-cell point lights weren't clipped to their own cell, so an adjacent
+  row's torch was bleeding into a `no-emissive` row's measurement and made the first reading
+  untrustworthy — fixed by giving `PointLight.distance` a hard cutoff well inside the row
+  spacing. Kept after this lands; it's the only place a future kit asset can be looked at before
+  a headset does.
+- **Verified: the luminance readout, not eyeballing a PNG.** Under the torch rig, the
+  bug-reproduction row measures mean luminance 0.52–0.60 (foreground pixels only — a mean over
+  the whole cell is mostly empty background and hides the signal); the fixed pipeline measures
+  0.22–0.46, close to the raw GLB's 0.06–0.36 floor and clearly short of white; no cell anywhere
+  in the grid has any near-white pixels. The boss-tint row confirms the multiply works on both
+  the textured Goblin and the two untextured models without flattening them.
+
+**Still a desktop-only check.** The lab and its screenshots are what a session without a headset
+can verify; the actual sign-off is opening `?scene=models` on the Quest 3, which is queued behind
+the same four Quest 3 passes the rest of Sprint 2.7 is waiting on.
+
 Known scaffolding, and the gaps:
 
 - **No texture compression pass.** PLAN.md asks for KTX2/Basis if the raw PNGs blow the budget,

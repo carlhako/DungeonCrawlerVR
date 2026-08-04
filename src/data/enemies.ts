@@ -48,10 +48,12 @@ export interface EnemyModelSpec {
   /** Served from `public/`, so `/models/x.glb` is `public/models/x.glb`. */
   url: string
   /**
-   * The model's own height, floor to top of head, in metres.
+   * The model's own height, floor to top of head, in metres — a fallback only.
    *
-   * Measured once when the pack lands, not trusted from the exporter. `modelScale` corrects it
-   * to the definition's `height`, which is what every readability decision was tuned against.
+   * `models.ts` measures the template's actual bind-pose bounds at load and uses that instead
+   * whenever it comes back finite and positive; this value is what a slot falls back to if a
+   * measurement fails. `fitModel` corrects to the definition's `height`, which is what every
+   * readability decision was tuned against.
    */
   sourceHeight: number
   /** Extra yaw in radians, for a kit whose models face +Z rather than the game's -Z. */
@@ -68,13 +70,14 @@ export interface EnemyDefinition {
 
   hp: number
   /**
-   * Hit sphere radius, in metres. Generous rather than exact — a near miss that reads as a
-   * hit is a much smaller sin than a clean hit that reads as a miss, which is what a player
-   * reports as "my sword went through it".
+   * Radius of the hit capsule, in metres. Generous rather than exact — a near miss that reads
+   * as a hit is a much smaller sin than a clean hit that reads as a miss, which is what a
+   * player reports as "my sword went through it".
    */
   radius: number
   /**
-   * Height of the hit sphere's centre above the floor.
+   * Height of the hit capsule's centre above the floor — `height / 2`, so the capsule spans
+   * floor to head.
    *
    * This is also the enemy's authoritative position: everything moves in a horizontal plane
    * at this height, and the model is drawn hanging below it. One position, no synchronising.
@@ -153,6 +156,11 @@ export interface EnemyDefinition {
    * Not decoration. The dungeon is lit by six torches and something approaching between two
    * of them is, at zero emissive, genuinely invisible — which is not tension, it is the game
    * failing to tell the player anything. The eyes carry most of this; see `Enemies.tsx`.
+   *
+   * A kit model has no eyes this game can address, so its resting glow rides on the whole
+   * body instead — see `resolveAppearance`. Keep this near zero for a model-backed definition
+   * unless the intent really is a body that glows at rest; the wind-up and hit-flash channels
+   * already carry the readability the eyes give a primitive.
    */
   glow: number
 
@@ -162,6 +170,24 @@ export interface EnemyDefinition {
    * Presentation only. Nothing about hit spheres, nav or AI reads this: a model is drawing.
    */
   model?: EnemyModelSpec
+
+  /**
+   * Recolours the kit's own albedo. Absent — the default, and what all three enemies use today
+   * — leaves a model exactly as the artist shipped it: the demon reads dark red, the ghost
+   * skull dark purple, because that is what is actually in the file.
+   *
+   * This exists for the roster `PLAN.md` already promises — elites and bosses that are a
+   * palette shift on a base creature — so a future definition can set this instead of the game
+   * growing a second material pipeline. When present, the colour is **multiplied** into each
+   * material's existing colour, never substituted for it: substitution is what Sprint 2.7's
+   * first pass did, and it is exactly the bug this file's history records — it flattened four
+   * distinct baked colours on the Demon-cast Skeleton Warrior into one flat tan, and two on the
+   * Ghost-Skull-cast Wraith into one flat pale blue, both of which read as pure white once a
+   * torch and ACES tone mapping got hold of them. A multiply keeps each material's own shading
+   * and only shifts its hue. `strength` (default 1) lerps between untinted and fully tinted, so
+   * a variant can be a nudge rather than a repaint.
+   */
+  tint?: { colour: string; strength?: number }
 }
 
 export const ENEMIES: Record<EnemyId, EnemyDefinition> = {
@@ -170,7 +196,7 @@ export const ENEMIES: Record<EnemyId, EnemyDefinition> = {
     name: 'Goblin Skulker',
     hp: 40,
     radius: 0.34,
-    centre: 0.72,
+    centre: 0.6,
     height: 1.2,
     speed: 2.5,
     aggroRadius: 11,
@@ -189,12 +215,16 @@ export const ENEMIES: Record<EnemyId, EnemyDefinition> = {
     cost: 1,
     minWave: 1,
     colour: '#6f8a4a',
-    // Kept low. The kit's textures are already green; the emissive here is just a hint of
-    // visibility in the dark, not a wash on top of the diffuse.
-    glow: 0.15,
+    // Measured against the model lab (`?scene=models`): the kit's atlas is already green and
+    // already visible under a torch, so the skin's own resting glow only needs to be a hint,
+    // not a wash. The primitive's actual dark-visibility channel is the eyes (see
+    // `EnemyShape.tsx`), which do not read this value, so turning it down costs the primitive
+    // almost nothing.
+    glow: 0.03,
     model: {
       url: '/models/goblin-skulker.glb',
-      sourceHeight: 1.2,
+      // Measured (`Box3` bind-pose bounds): 2.984. The exporter's own scale was never 1.2.
+      sourceHeight: 2.984,
       // The kit's rig faces +Z, away from the player it is chasing. Flip it to face forward.
       yawOffset: Math.PI,
       clips: {
@@ -214,7 +244,7 @@ export const ENEMIES: Record<EnemyId, EnemyDefinition> = {
     name: 'Skeleton Warrior',
     hp: 110,
     radius: 0.42,
-    centre: 1.02,
+    centre: 0.925,
     height: 1.85,
     speed: 1.5,
     aggroRadius: 13,
@@ -234,14 +264,20 @@ export const ENEMIES: Record<EnemyId, EnemyDefinition> = {
     gold: 18,
     cost: 3,
     minWave: 1,
-    // A more saturated bone than the near-white the early pass used. The skeleton's emissive is
-    // taken from this colour, and a near-white emissive paints the kit's bone textures with the
-    // same near-white wash — which is what "mostly white" reads as on the headset.
+    // A more saturated bone than the near-white the early pass used. Used for the state
+    // emissive (flash/burn/chill) and the primitive's skin — see `tint` below for why the
+    // model no longer has this painted onto its own diffuse.
     colour: '#b8a888',
-    glow: 0.12,
+    // Measured against the model lab: at the old 0.12 this alone pushed the Demon-cast model
+    // from a raw-GLB mean luminance of ~0.25 up to ~0.55 under a torch, on top of everything
+    // else already stacking toward white. The resting glow was doing very little for the
+    // primitive (the eyes carry that) and a lot of harm to the model, so it comes down close
+    // to zero; `flash`/`burn`/`chill` still add their own boost on top of whatever this is.
+    glow: 0.03,
     model: {
       url: '/models/skeleton-warrior.glb',
-      sourceHeight: 1.85,
+      // Measured (`Box3` bind-pose bounds): 1.676.
+      sourceHeight: 1.676,
       // The kit's rig faces +Z, away from the player it is chasing. Flip it to face forward.
       yawOffset: Math.PI,
       clips: {
@@ -264,7 +300,7 @@ export const ENEMIES: Record<EnemyId, EnemyDefinition> = {
     name: 'Wraith',
     hp: 55,
     radius: 0.4,
-    centre: 1.1,
+    centre: 0.95,
     height: 1.9,
     // Slow, because it does not need to be fast: it is already taking the short way.
     speed: 1.15,
@@ -285,14 +321,15 @@ export const ENEMIES: Record<EnemyId, EnemyDefinition> = {
     minWave: 3,
     colour: '#7fa8c8',
     // Was 1.1, which put the Wraith into channel saturation at idle — every frame, with no
-    // wind-up involved. Its visibility in the dark is already carried by the halo and the
-    // eyes; with the Ghost Skull kit's already-pale diffuse, even a modest emissive was
-    // pushing the whole body toward white. 0.1 keeps the silhouette readable in the dark
-    // without bleaching the textures.
-    glow: 0.1,
+    // wind-up involved. Then 0.1, measured against the model lab as still enough on its own to
+    // push the Ghost-Skull-cast model well toward white under a torch. Visibility in the dark
+    // is carried by the halo and the eyes; this is close to zero for the same reason the other
+    // two are.
+    glow: 0.03,
     model: {
       url: '/models/wraith.glb',
-      sourceHeight: 1.9,
+      // Measured (`Box3` bind-pose bounds): 3.101.
+      sourceHeight: 3.101,
       // It comes through the wall, so it must not also look like it is walking on the floor.
       // The float is what sells the one thing this enemy is for.
       yOffset: 0.12,
