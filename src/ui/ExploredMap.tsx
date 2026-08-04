@@ -15,11 +15,10 @@ import { HudOverlay } from '@/ui/HudOverlay'
 const CANVAS_W = 200
 const CANVAS_H = 200
 const SIZE_M: [number, number] = [0.18, 0.18]
-// Centre, nudged down slightly so it sits under the enemy counter rather than behind it.
-// Was pinned to the bottom-left corner, which sat past what a headset's FOV covers without
-// turning the head — outside the union frustum's safe margin, so it never rendered at all.
-// Gated behind a controller button (see `requireSideButton` below), same as the counter.
-const ANCHOR: [number, number, number] = [0, -0.2, -1]
+// Bottom-left corner, pulled in by SAFE_FRACTION so it stays inside the headset's FOV
+// without turning the head. Gated behind a controller button (see `requireSideButton`
+// below), same as the counter.
+const ANCHOR: [number, number, number] = [-0.85, -0.85, -1]
 const PX_PER_CELL = 4
 
 function draw(ctx: CanvasRenderingContext2D, w: number, h: number): void {

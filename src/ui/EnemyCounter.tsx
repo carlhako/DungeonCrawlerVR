@@ -12,12 +12,10 @@ import { HudOverlay } from '@/ui/HudOverlay'
 const CANVAS_W = 256
 const CANVAS_H = 64
 const SIZE_M: [number, number] = [0.4, 0.1]
-// Centre, nudged up slightly so it sits above the aim line rather than on top of it. Was
-// pinned to the top edge, which put it above what a headset's vertical FOV could reach
-// without turning the neck — you cannot look up at a HUD quad that follows your look
-// direction. Gated behind a controller button (see `requireSideButton` below), it no
-// longer needs to be out of the way at a glance: it is off unless summoned.
-const ANCHOR: [number, number, number] = [0, 0.15, -1]
+// Top centre, pulled in by SAFE_FRACTION so it stays inside the headset's vertical FOV
+// without turning the neck. Gated behind a controller button (see `requireSideButton`
+// below), it no longer needs to be out of the way at a glance: it is off unless summoned.
+const ANCHOR: [number, number, number] = [0, 0.95, -1]
 
 function draw(ctx: CanvasRenderingContext2D, w: number, h: number): void {
   const r = 8
