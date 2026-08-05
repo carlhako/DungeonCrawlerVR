@@ -334,56 +334,72 @@ export function findArcHit(
 export const MAX_TELEPORT_SLOPE_DEGREES = 45
 
 /**
- * Per-hand contribution to the body's horizontal motion in gorilla mode.
+ * Clamp a hand to the end of an arm of `maxArmLength`, measured from the head.
  *
- * Pulling a hand towards the body pushes the body in the opposite direction — the
- * inversion is the whole mechanism. When the hand is not gripping, the contribution is
- * exactly zero so the player can rest their arms without drifting backwards.
- *
- * `transferFactor` is the multiplier on the hand's per-step displacement. 1.0 (the
- * Gorilla Locomotion default) means the body moves exactly as far as the hand did; tuning
- * it up or down changes how "weighty" the motion feels.
- *
- * Pure so the test in `locomotion.gorilla.test.ts` can lock the contract independently of
- * three.js, Rapier, or any session state.
+ * `Player.CurrentLeftHandPosition` in the reference implementation. Without it, a player
+ * who reaches through a wall — or whose controller drops tracking and reports a pose a long
+ * way off — gets a hand anchor at that far point and is launched towards it. Clamping the
+ * *reported* position rather than rejecting it keeps the motion continuous at the limit.
  */
-export function gorillaHandContribution(
-  prev: Vec3,
-  current: Vec3,
-  gripping: boolean,
-  transferFactor = 1,
-): Vec3 {
-  if (!gripping) return { x: 0, y: 0, z: 0 }
+export function clampArmReach(hand: Vec3, head: Vec3, maxArmLength: number): Vec3 {
+  const dx = hand.x - head.x
+  const dy = hand.y - head.y
+  const dz = hand.z - head.z
+  const length = Math.hypot(dx, dy, dz)
+  if (length < maxArmLength || length === 0) return { x: hand.x, y: hand.y, z: hand.z }
+  const scale = maxArmLength / length
   return {
-    x: -(current.x - prev.x) * transferFactor,
-    y: -(current.y - prev.y) * transferFactor,
-    z: -(current.z - prev.z) * transferFactor,
+    x: head.x + dx * scale,
+    y: head.y + dy * scale,
+    z: head.z + dz * scale,
   }
 }
 
 /**
- * Where the body sits in space when both hands are anchoring it to a wall.
+ * One hand's contribution to the body's movement, for a hand that is in contact.
  *
- * The midpoint of the two hands is the natural anchor — pull both hands up by the same
- * amount and the body rises by the inverse of that amount, without any orientation work.
- * Adding `wallNormal * bodyOffset` keeps the capsule clear of the wall mesh so the renderer
- * and the physics agree about where the body is.
+ * This is the whole mechanism, and it is *not* a frame-to-frame delta. A touching hand owns
+ * a world-space `anchor` — the point on the surface it is stuck to — and the body moves by
+ * however far the hand has strayed from that anchor, inverted. Pull your hand back towards
+ * your chest and the anchor stays on the wall, so the body is dragged towards the wall.
  *
- * `wallNormal` is expected to be unit length; the function does not normalise it because
- * the caller already has the value from a Rapier raycast hit and renormalising silently is
- * the kind of behaviour that makes "why does the body sit off the wall" a forty-minute
- * debug session.
+ * `wasTouching` picks which point to measure from, exactly as the reference does: a hand
+ * that was already touching measures from its established `anchor`, while a hand that has
+ * just made contact measures from `contactPoint` (where the sweep stopped this step), so the
+ * frame it lands contributes only the part of the motion that happened after contact.
+ *
+ * Pure so the test in `locomotion.gorilla.test.ts` can lock the contract independently of
+ * three.js, Rapier, or any session state.
  */
-export function gorillaBodyFromHands(
-  h1: Vec3,
-  h2: Vec3,
-  wallNormal: Vec3,
-  bodyOffset: number,
+export function gorillaHandOffset(
+  anchor: Vec3,
+  current: Vec3,
+  contactPoint: Vec3,
+  wasTouching: boolean,
 ): Vec3 {
+  const from = wasTouching ? anchor : contactPoint
   return {
-    x: (h1.x + h2.x) / 2 + wallNormal.x * bodyOffset,
-    y: (h1.y + h2.y) / 2 + wallNormal.y * bodyOffset,
-    z: (h1.z + h2.z) / 2 + wallNormal.z * bodyOffset,
+    x: from.x - current.x,
+    y: from.y - current.y,
+    z: from.z - current.z,
+  }
+}
+
+/**
+ * Fold two per-hand offsets into one body movement.
+ *
+ * Averaged when both hands are in contact, summed otherwise. The asymmetry is deliberate
+ * and is in the reference: two hands on the same wall each want to move the body the full
+ * distance, and adding them would move it twice as far as either hand asked for. One hand
+ * on a surface and one in the air is not a disagreement to average — the airborne hand
+ * contributes a zero that would silently halve the moving hand's pull.
+ */
+export function combineHandMovement(left: Vec3, right: Vec3, bothTouching: boolean): Vec3 {
+  const divisor = bothTouching ? 2 : 1
+  return {
+    x: (left.x + right.x) / divisor,
+    y: (left.y + right.y) / divisor,
+    z: (left.z + right.z) / divisor,
   }
 }
 

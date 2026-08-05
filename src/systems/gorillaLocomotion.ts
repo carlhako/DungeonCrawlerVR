@@ -1,17 +1,19 @@
 import { useEffect, useMemo, useRef } from 'react'
+import { useThree } from '@react-three/fiber'
 import { useRapier } from '@react-three/rapier'
 import { useXR } from '@react-three/xr'
-import { QueryFilterFlags, Ray, type Collider, type World } from '@dimforge/rapier3d-compat'
-import { Quaternion, Vector3 } from 'three'
-import { SystemOrder } from '@/core/loop'
-import { FIXED_STEP } from '@/core/loop'
+import { Ball, QueryFilterFlags, type Collider, type World } from '@dimforge/rapier3d-compat'
+import { Matrix4, Vector3 } from 'three'
+import { FIXED_STEP, SystemOrder } from '@/core/loop'
 import { useFixedUpdate } from '@/core/simulation'
 import { useSettings } from '@/systems/settings'
 import {
   applyDeadzone,
-  gorillaBodyFromHands,
-  gorillaHandContribution,
+  clampArmReach,
+  combineHandMovement,
+  gorillaHandOffset,
   moveDirection,
+  DEFAULT_VERTICAL,
   type Vec3,
 } from '@/systems/locomotion'
 import { playerCollider, playerState } from '@/systems/player'
@@ -21,88 +23,123 @@ import { xrHands } from '@/systems/xrHands'
 /**
  * Gorilla Tag-style locomotion, as a third opt-in mode.
  *
- * Three states: `floor` (standing), `wall` (held by hands on a climbable surface), and
- * `air` (falling). The body is driven by hand motion on the floor, by an analytic
- * midpoint-plus-offset solve while on a wall, and by gravity while in the air. When the
- * player is on the floor and is not gripping either controller, the left thumbstick falls
- * back to the smooth-stick path — same speed, same deadzone, no second walking system to
- * tune.
+ * A port of Another Axiom's reference implementation
+ * (https://github.com/Another-Axiom/GorillaLocomotion, `Player.cs`), which is one loop with
+ * no states in it at all: each hand sweeps a small sphere through the world, a hand that
+ * hits something sticks to the point it hit, and the body moves by however far the hand has
+ * since strayed from that stuck point, inverted. Walking, climbing, vaulting and hanging all
+ * fall out of that one rule — there is no "am I on a wall" branch here, and the earlier
+ * version's `floor`/`wall`/`air` state machine is gone because it was re-deriving, badly,
+ * what the anchor already encodes.
  *
- * The module owns its own per-hand state because the previous-frame hand position is only
- * meaningful in the context of the current fixed step, and that is exactly what this
- * driver is doing. `xrInput` stays focused on buttons, `xrHands` stays focused on poses.
+ * The module owns its own per-hand anchors and its own velocity. `xrInput` stays focused on
+ * buttons, `xrHands` stays focused on poses, and the rig is handed a finished per-step
+ * displacement to resolve against the world.
  *
- * Registered at `SystemOrder.Player - 1`, the same slot `TeleportAim` uses, so the rig
- * reads a freshly computed value on the same step the module writes it.
+ * Registered at `SystemOrder.Player - 1`, the same slot `TeleportAim` uses, so the rig reads
+ * a freshly computed value on the same step the module writes it.
  */
 
-/** How far the player's hand reaches to establish a grip. Short on purpose: a hand
- *  clearly touching a wall is grip, a hand nearby but not on it is not. */
-export const GRIP_RANGE = 0.05
+/**
+ * Radius of the sphere each hand sweeps. `minimumRaycastDistance` in the reference.
+ *
+ * This is a *sweep*, not a ray along the controller's forward axis. Which way the controller
+ * points has nothing to do with whether your hand is touching the floor beside you, and
+ * making it matter is what made the previous version impossible to move in.
+ */
+export const HAND_RADIUS = 0.05
 
-/** How far the body sits off a wall along the wall normal. Sized so the capsule does not
- *  intersect the wall mesh and so two-handed climbing produces a stable midpoint. */
-export const BODY_OFFSET = 0.4
+/**
+ * How far a hand may sit from the head before it is clamped back onto the end of the arm.
+ * The reference's `maxArmLength`.
+ */
+export const MAX_ARM_LENGTH = 1.5
 
-/** Per-step displacement multiplier for hands. 1.0 is the Gorilla Locomotion default —
- *  the body moves exactly as far as the hand did. Tuned in playtest via the F2 panel. */
-export const TRANSFER_FACTOR = 1
+/**
+ * How far a stuck hand may stray from its anchor before the anchor is released, provided
+ * there is nothing solid between the head and the hand. The reference's `unStickDistance`.
+ *
+ * Without it a hand that anchors just inside a wall stays welded there and the body is
+ * dragged back to it every step — you get stuck to the level and cannot walk away.
+ */
+export const UNSTICK_DISTANCE = 1
 
-/** Deadzone used for the joystick fallback while on the floor in gorilla mode. Matched to
- *  the smooth-mode value in PlayerRig so the two paths feel identical when the player
- *  rests their arms. */
+/**
+ * Momentum released when the hands let go, from the reference's inspector defaults.
+ *
+ * Below `VELOCITY_LIMIT` the body simply stops when contact ends — otherwise every small
+ * hand adjustment while standing still would fling you. Above it, the recent average body
+ * velocity is handed to the airborne integrator, scaled and capped.
+ */
+export const VELOCITY_LIMIT = 0.4
+export const MAX_JUMP_SPEED = 6.5
+export const JUMP_MULTIPLIER = 1.1
+
+/**
+ * How many steps of body velocity are averaged for the release above. The reference samples
+ * roughly a tenth of a second; at a fixed 60Hz that is six.
+ */
+const VELOCITY_HISTORY_SIZE = 6
+
+/** Downward speed kept while standing, so the character controller keeps reporting ground.
+ *  Matched to `integrateVertical`'s value — see `reportGorillaResolved`. */
+const GROUNDED_PROBE_SPEED = -1
+
+/**
+ * Shrink factor applied to the swept sphere, the reference's `defaultPrecision`. Keeps the
+ * sweep from immediately re-hitting the surface it is already resting against.
+ */
+const PRECISION = 0.995
+
+/**
+ * How much a contact is allowed to slide along the surface, the reference's
+ * `defaultSlideFactor`. Two hands braced on one wall do not stick 100% — without the slide,
+ * pushing along a surface locks solid the moment both hands are down. A single hand slides
+ * essentially not at all, which is what makes a one-handed climbing hold feel like a hold.
+ */
+const SLIDE_FACTOR_TWO_HANDED = 0.03
+const SLIDE_FACTOR_ONE_HANDED = 0.001
+
+/** Deadzone used for the joystick fallback while no hand is in contact. Matched to the
+ *  smooth-mode value in PlayerRig so the two paths feel identical. */
 const STICK_DEADZONE = 0.15
 
-/** Below this vertical component, a hit normal counts as a wall rather than a floor or
- *  ceiling. 0.7 is roughly 45 degrees — steeper than any dungeon surface actually is, so
- *  the split is really "flat" vs "upright", not a fine-grained slope cutoff. */
-const WALL_NORMAL_MAX_UP = 0.7
-
-type LocomotionState = 'floor' | 'wall' | 'air'
-
 interface PerHandState {
-  previousPosition: Vec3
-  currentPosition: Vec3
-  isGripping: boolean
-  /** True when the touched surface is (close to) vertical — a climbable wall rather than
-   *  the floor or ceiling. Distinguishes "push off the floor to walk" from "grab the wall
-   *  to climb" without needing a second rigid body per surface type. */
-  onWall: boolean
-  /** Unit vector pointing out of the surface the hand is touching. */
-  gripNormal: Vec3
-  /** World-space contact point: where the hand's raycast hit the surface. */
-  gripContactPoint: Vec3
-  /** The collider the hand is currently gripping, used to detect "same surface". */
-  gripCollider: Collider | null
-  /** True once the position has been observed at least once — guards against a stale
-   *  `previousPosition` from before this hand ever existed in this session. */
+  /**
+   * World point this hand is stuck to. While the hand is touching, this is a fixed point on
+   * the surface and the body moves to keep the hand near it; while it is free, it just
+   * trails the hand. The reference's `lastLeftHandPosition`.
+   */
+  anchor: Vec3
+  /** Whether the hand was in contact at the end of the previous step. Decides whether this
+   *  step measures from the established anchor or from the fresh contact point. */
+  wasTouching: boolean
+  /** True once a pose has been observed, so the anchor is a real world point rather than
+   *  the origin. A hand that has never been seen must not drag the body towards {0,0,0}. */
   initialised: boolean
 }
 
 interface GorillaRuntime {
-  state: LocomotionState
   leftHand: PerHandState
   rightHand: PerHandState
-  /** Horizontal motion to apply for this step. Vertical is owned by the rig's gravity
-   *  integration; the gorilla math has no opinion on `y`. */
-  motion: Vec3
-  /** When non-null, the rig bypasses the character controller and writes this position
-   *  directly. Only set while in `wall` state. */
-  bodyPositionOverride: Vec3 | null
-  /** The wall normal that drove the body offset, so the rig can sanity-check it without
-   *  recomputing. */
-  wallNormal: Vec3 | null
+  /** Body displacement for this step, in metres, all three axes. The rig resolves it
+   *  against the world; this module has no opinion about what it collides with. */
+  displacement: Vec3
+  /** True when at least one hand was in contact this step. The rig uses it for the comfort
+   *  vignette and to know the player is not in free fall. */
+  touching: boolean
+  /** Airborne velocity: gravity plus whatever momentum the hands released. Zeroed on
+   *  contact, same as the reference zeroing the rigid body's velocity. */
+  velocity: Vec3
+  /** Ring buffer of recent body velocities, for the release above. */
+  velocityHistory: Vec3[]
+  velocityIndex: number
 }
 
 function emptyHand(): PerHandState {
   return {
-    previousPosition: { x: 0, y: 0, z: 0 },
-    currentPosition: { x: 0, y: 0, z: 0 },
-    isGripping: false,
-    onWall: false,
-    gripNormal: { x: 0, y: 0, z: 0 },
-    gripContactPoint: { x: 0, y: 0, z: 0 },
-    gripCollider: null,
+    anchor: { x: 0, y: 0, z: 0 },
+    wasTouching: false,
     initialised: false,
   }
 }
@@ -113,48 +150,86 @@ function emptyHand(): PerHandState {
  * place, never reassigned.
  */
 const runtime: GorillaRuntime = {
-  state: 'floor',
   leftHand: emptyHand(),
   rightHand: emptyHand(),
-  motion: { x: 0, y: 0, z: 0 },
-  bodyPositionOverride: null,
-  wallNormal: null,
+  displacement: { x: 0, y: 0, z: 0 },
+  touching: false,
+  velocity: { x: 0, y: 0, z: 0 },
+  velocityHistory: Array.from({ length: VELOCITY_HISTORY_SIZE }, () => ({ x: 0, y: 0, z: 0 })),
+  velocityIndex: 0,
+}
+
+export interface GorillaMotion {
+  /** Per-step body displacement in metres, for the rig to resolve. */
+  displacement: Vec3
+  /** True while at least one hand is on a surface. */
+  touching: boolean
 }
 
 /**
- * Take the gorilla module's last computed motion and body override.
+ * Take the gorilla module's last computed displacement.
  *
- * Reads, does not clear — the gorilla module overwrites both every step, and the rig reads
- * them exactly once. Mirrors `consumeTeleport`'s no-clear contract where the gorilla
- * module owns the lifetime.
+ * Reads, does not clear — the gorilla module overwrites it every step and the rig reads it
+ * exactly once. Mirrors `consumeTeleport`'s no-clear contract where the module owns the
+ * lifetime.
  */
-export interface GorillaMotion {
-  motion: Vec3
-  bodyPositionOverride: Vec3 | null
+export function consumeGorillaMotion(): GorillaMotion {
+  return { displacement: runtime.displacement, touching: runtime.touching }
 }
 
-export function consumeGorillaMotion(): GorillaMotion {
-  return {
-    motion: runtime.motion,
-    bodyPositionOverride: runtime.bodyPositionOverride,
+/**
+ * Tell the module the world refused some of the movement it asked for — the rig calls this
+ * with the resolved displacement after the character controller has had its say.
+ *
+ * Without it, walking into a wall keeps accumulating downward velocity against the floor and
+ * a blocked climb keeps its upward momentum, so letting go pops the player through the
+ * ceiling. The reference gets this for free from Unity's rigid body; we are kinematic, so
+ * the correction has to come back explicitly.
+ */
+export function reportGorillaResolved(resolved: Vec3, grounded: boolean): void {
+  // Pinned to a small negative rather than zero, for the same reason `integrateVertical`
+  // does it: the character controller detects ground by trying to move into it, so a body
+  // with exactly zero downward velocity oscillates between grounded and airborne on flat
+  // floor. Reusing the value the smooth path already proved rather than picking a new one.
+  if (grounded && runtime.velocity.y < 0) runtime.velocity.y = GROUNDED_PROBE_SPEED
+  // Blocked on the way up is a ceiling: drop the upward component rather than pinning the
+  // player against it for the rest of the arc.
+  if (runtime.velocity.y > 0 && resolved.y < runtime.displacement.y - 1e-4) {
+    runtime.velocity.y = 0
   }
 }
 
 /**
- * True while the player is being driven by the gorilla module — the rig uses this to
- * decide whether to feed hand math into the character controller or to bypass it entirely.
+ * Clear every anchor and all momentum.
+ *
+ * Exported for `gorillaLocomotion.contact.test.ts`, which drives `stepGorilla` directly
+ * against a real Rapier world — the module keeps its state in a singleton, so a test that
+ * cannot reset it can only ever assert about the first scenario it runs.
  */
-export function isGorillaDriving(): boolean {
-  return runtime.state !== 'floor' || runtime.motion.x !== 0 || runtime.motion.z !== 0
+export function resetGorillaRuntime(): void {
+  // Mutated in place, never reassigned. The disabled path calls this on *every* fixed step —
+  // which is every step of every desktop session and of any VR session not in gorilla mode —
+  // so allocating a pair of hand objects here would be a steady drip of garbage for a mode
+  // that is switched off. The fixed loop does not allocate; see `CharacterController`.
+  clearHand(runtime.leftHand)
+  clearHand(runtime.rightHand)
+  setZero(runtime.displacement)
+  setZero(runtime.velocity)
+  runtime.touching = false
+  for (const v of runtime.velocityHistory) setZero(v)
+  runtime.velocityIndex = 0
 }
 
-function resetRuntime(): void {
-  runtime.state = 'floor'
-  runtime.leftHand = emptyHand()
-  runtime.rightHand = emptyHand()
-  runtime.motion = { x: 0, y: 0, z: 0 }
-  runtime.bodyPositionOverride = null
-  runtime.wallNormal = null
+function clearHand(hand: PerHandState): void {
+  setZero(hand.anchor)
+  hand.wasTouching = false
+  hand.initialised = false
+}
+
+function setZero(v: Vec3): void {
+  v.x = 0
+  v.y = 0
+  v.z = 0
 }
 
 /**
@@ -163,6 +238,8 @@ function resetRuntime(): void {
  */
 export function GorillaLocomotion() {
   const { world } = useRapier()
+  const gl = useThree((state) => state.gl)
+  const camera = useThree((state) => state.camera)
   const session = useXR((state) => state.session)
   const settings = useSettings()
 
@@ -170,35 +247,31 @@ export function GorillaLocomotion() {
 
   // Ref, not dependency. Settings and session change freely during play; the fixed-loop
   // system must keep running across those changes rather than re-registering on each one.
-  const latest = useRef({ world, enabled, moveSpeed: settings.moveSpeed })
-  latest.current = { world, enabled, moveSpeed: settings.moveSpeed }
+  const latest = useRef({ world, enabled, moveSpeed: settings.moveSpeed, gl, camera })
+  latest.current = { world, enabled, moveSpeed: settings.moveSpeed, gl, camera }
 
-  const scratch = useMemo(
-    () => ({
-      origin: new Vector3(),
-      direction: new Vector3(),
-      rotation: new Quaternion(),
-      ray: new Ray({ x: 0, y: 0, z: 0 }, { x: 0, y: 1, z: 0 }),
-    }),
-    [],
-  )
+  const scratch = useMemo(() => createGorillaScratch(), [])
 
   useEffect(() => {
     if (enabled) return
-    // Switching out of gorilla mode must not leave stale grip state hanging around for the
-    // next mode to inherit. A `wall` bodyPositionOverride would silently teleport the
-    // player the moment they switch to smooth.
-    resetRuntime()
+    // Switching out of gorilla mode must not leave stale anchors hanging around for the next
+    // mode to inherit — a live anchor would drag the player the moment they switch back.
+    resetGorillaRuntime()
   }, [enabled])
 
-  useFixedUpdate(() => {
-    const { world: w, enabled: on } = latest.current
-    if (!on) {
-      resetRuntime()
-      return
-    }
-    stepGorilla(w, latest.current.moveSpeed, scratch)
-  }, SystemOrder.Player - 1, [])
+  useFixedUpdate(
+    () => {
+      const { world: w, enabled: on, moveSpeed, gl: renderer, camera: cam } = latest.current
+      if (!on) {
+        resetGorillaRuntime()
+        return
+      }
+      readHeadPosition(renderer, cam, scratch)
+      stepGorilla(w, moveSpeed, scratch)
+    },
+    SystemOrder.Player - 1,
+    [],
+  )
 
   return null
 }
@@ -207,281 +280,443 @@ export function GorillaLocomotion() {
 // Per-step computation
 // ---------------------------------------------------------------------------
 
-interface StepScratch {
-  origin: Vector3
-  direction: Vector3
-  rotation: Quaternion
-  ray: Ray
+/**
+ * Per-step working memory. Allocated once and reused, because the fixed loop is not allowed
+ * to allocate — see `CharacterController` in PlayerRig.
+ *
+ * Exported, along with `createGorillaScratch` and `stepGorilla`, so the contact test can
+ * drive a step directly against a Rapier world. `head` is a plain field rather than
+ * something read from the renderer, which is what makes that test possible without a
+ * headset: the caller says where the head is.
+ */
+export interface GorillaScratch {
+  headMatrix: Matrix4
+  head: Vec3
+  handPosition: Vector3
+  ball: Ball
+  /** The reference's sanity-check sphere: smaller, so it can be swept further to catch a
+   *  surface the full-size sweep was already resting against. See `sweepHand`. */
+  smallBall: Ball
+  identity: { x: number; y: number; z: number; w: number }
 }
 
-function stepGorilla(world: World, moveSpeed: number, scratch: StepScratch): void {
-  detectGrip(world, scratch)
-  updateHandPositions()
-  advanceStateMachine()
-  emitMotion(moveSpeed)
+export function createGorillaScratch(): GorillaScratch {
+  return {
+    headMatrix: new Matrix4(),
+    head: { x: 0, y: 0, z: 0 },
+    handPosition: new Vector3(),
+    ball: new Ball(HAND_RADIUS * PRECISION),
+    smallBall: new Ball(HAND_RADIUS * PRECISION * 0.66),
+    identity: { x: 0, y: 0, z: 0, w: 1 },
+  }
+}
+
+interface HeadSource {
+  xr: { isPresenting: boolean; getCamera: () => { matrixWorld: Matrix4 } }
 }
 
 /**
- * One short raycast per hand. Hits a collider whose parent rigid body has
- * `userData.grippable === true` → grip established.
- *
- * No button involved — real Gorilla Tag locomotion is pure hand-contact physics, not a
- * held button, so a hand only has to be touching a surface for it to count. The player's
- * own capsule is excluded so a hand raycast that happens to start inside the body does not
- * establish a phantom grip on the player.
+ * Where the player's head is, in world space. Inside a session that is the XR camera, which
+ * is the only pose that tracks the actual head; `state.camera` is not updated while
+ * presenting. Same read the rig does — see `readHead` in PlayerRig.
  */
-function detectGrip(world: World, scratch: StepScratch): void {
-  for (const handedness of ['left', 'right'] as const) {
-    const hand = handedness === 'left' ? runtime.leftHand : runtime.rightHand
-    hand.isGripping = false
-    hand.onWall = false
-    hand.gripCollider = null
+function readHeadPosition(
+  gl: HeadSource,
+  fallback: { matrixWorld: Matrix4 },
+  scratch: GorillaScratch,
+): void {
+  const head = gl.xr.isPresenting ? gl.xr.getCamera() : fallback
+  scratch.headMatrix.copy(head.matrixWorld)
+  const e = scratch.headMatrix.elements
+  scratch.head.x = e[12] ?? 0
+  scratch.head.y = e[13] ?? 0
+  scratch.head.z = e[14] ?? 0
+}
 
-    const aim = handedness === 'left' ? xrHands.left : xrHands.right
-    if (!aim) continue
+/** A contact: where the swept sphere came to rest, and the surface it rested against. */
+interface Contact {
+  position: Vec3
+  /**
+   * The axis of the contact — perpendicular to the surface, but *unsigned*. Rapier's
+   * `normal2` points from the sweeping sphere into the surface, the opposite of the
+   * outward normal you would expect; the only thing this is used for is projecting the
+   * slide onto the contact plane, and `v - n(v·n)` gives the same answer either way. Naming
+   * it `normal` would be an invitation to use it for something where the sign matters.
+   */
+  contactAxis: Vec3
+  collider: Collider
+}
 
-    aim.getWorldPosition(scratch.origin)
-    aim.getWorldQuaternion(scratch.rotation)
-    scratch.direction.set(0, 0, -1).applyQuaternion(scratch.rotation)
+export function stepGorilla(world: World, moveSpeed: number, scratch: GorillaScratch): void {
+  const dt = FIXED_STEP
+  const left = handPositions('left', scratch)
+  const right = handPositions('right', scratch)
 
-    scratch.ray.origin = scratch.origin
-    scratch.ray.dir = scratch.direction
+  // --- First pass: has each hand made or kept contact, and what does it want the body to do?
+  //
+  // The downward nudge is in the reference and is load-bearing: it is what lets a hand
+  // resting flat on the floor keep registering. Without it a still hand sweeps a zero-length
+  // path, finds nothing, and lets go of the ground it is plainly touching.
+  const gravityNudge = 2 * Math.abs(DEFAULT_VERTICAL.gravity) * dt * dt
 
-    const hit = world.castRayAndGetNormal(
-      scratch.ray,
-      GRIP_RANGE,
-      true,
-      QueryFilterFlags.EXCLUDE_SENSORS,
-      undefined,
-      playerCollider.current ?? undefined,
+  const leftContact = left
+    ? sweepHand(world, runtime.leftHand.anchor, travel(runtime.leftHand.anchor, left, gravityNudge), true, scratch)
+    : null
+  const rightContact = right
+    ? sweepHand(world, runtime.rightHand.anchor, travel(runtime.rightHand.anchor, right, gravityNudge), true, scratch)
+    : null
+
+  const leftOffset =
+    left && leftContact
+      ? gorillaHandOffset(runtime.leftHand.anchor, left, leftContact.position, runtime.leftHand.wasTouching)
+      : ZERO
+  const rightOffset =
+    right && rightContact
+      ? gorillaHandOffset(runtime.rightHand.anchor, right, rightContact.position, runtime.rightHand.wasTouching)
+      : ZERO
+
+  let leftTouching = leftContact != null
+  let rightTouching = rightContact != null
+
+  if (leftTouching || rightTouching) {
+    runtime.velocity.x = 0
+    runtime.velocity.y = 0
+    runtime.velocity.z = 0
+  }
+
+  // A hand that *was* touching still counts towards the average even on a step where the
+  // sweep missed, so a single dropped frame of tracking doesn't double the body's movement.
+  const leftEngaged = leftTouching || runtime.leftHand.wasTouching
+  const rightEngaged = rightTouching || runtime.rightHand.wasTouching
+  const movement = combineHandMovement(leftOffset, rightOffset, leftEngaged && rightEngaged)
+
+  // --- Airborne: gravity and released momentum.
+  if (!leftTouching && !rightTouching) {
+    runtime.velocity.y = Math.max(
+      DEFAULT_VERTICAL.terminalVelocity,
+      runtime.velocity.y + DEFAULT_VERTICAL.gravity * dt,
     )
-    if (!hit) continue
-
-    // The flag lives on the parent rigid body, not the collider — see Dungeon.tsx. Both the
-    // wall body and the floor/ceiling body carry it now; everything solid in the dungeon is
-    // touchable, and it's the normal below that tells floor-push apart from wall-climb.
-    const userData = hit.collider.parent()?.userData as { grippable?: boolean } | undefined
-    if (userData?.grippable !== true) continue
-
-    hand.isGripping = true
-    hand.onWall = Math.abs(hit.normal.y) < WALL_NORMAL_MAX_UP
-    hand.gripCollider = hit.collider
-    hand.gripNormal = { x: hit.normal.x, y: hit.normal.y, z: hit.normal.z }
-    hand.gripContactPoint = {
-      x: scratch.origin.x + scratch.direction.x * hit.timeOfImpact,
-      y: scratch.origin.y + scratch.direction.y * hit.timeOfImpact,
-      z: scratch.origin.z + scratch.direction.z * hit.timeOfImpact,
-    }
-  }
-}
-
-/**
- * Promote `currentPosition` from last frame's `currentPosition` into `previousPosition`,
- * then read this frame's hand position into `currentPosition`.
- *
- * The previous/current pair is what `gorillaHandContribution` reads; one frame of lag is
- * exactly what we want, because the body should respond to the hand motion that *led* to
- * the current pose, not to the current pose itself.
- *
- * The first frame after a hand appears (re-connection, session start) seeds both
- * `previousPosition` and `currentPosition` to the same world point, so the first
- * displacement is zero — without this guard, a freshly-visible hand at world position P
- * would contribute `-(P - {0,0,0})` to the body, which is a long way to be flung by
- * "I just appeared".
- */
-function updateHandPositions(): void {
-  for (const handedness of ['left', 'right'] as const) {
-    const hand = handedness === 'left' ? runtime.leftHand : runtime.rightHand
-    const obj = handedness === 'left' ? xrHands.left : xrHands.right
-    if (!obj) {
-      // No tracked pose this step. Mark uninitialised so the next frame is treated as the
-      // first frame again, and reset both positions so a stale value cannot leak through.
-      hand.initialised = false
-      hand.previousPosition = { x: 0, y: 0, z: 0 }
-      hand.currentPosition = { x: 0, y: 0, z: 0 }
-      continue
-    }
-
-    const v = _scratchVec
-    obj.getWorldPosition(v)
-
-    if (!hand.initialised) {
-      // First frame after the hand reappears: seed both halves of the pair to the current
-      // world point, so the first displacement is zero.
-      hand.previousPosition = { x: v.x, y: v.y, z: v.z }
-      hand.currentPosition = { x: v.x, y: v.y, z: v.z }
-      hand.initialised = true
-      continue
-    }
-
-    // Subsequent frames: previous takes last frame's current, current takes this frame.
-    hand.previousPosition = hand.currentPosition
-    hand.currentPosition = { x: v.x, y: v.y, z: v.z }
-  }
-}
-
-const _scratchVec = new Vector3()
-
-/**
- * State transitions. Designed around the rules:
- *
- *   floor → wall  when both hands grip the same collider, wall-side (not floor or ceiling)
- *   floor → air   when ground is lost
- *   wall  → air   when both wall-grips release (releasing one hand keeps `wall` — the body
- *                 hangs from the remaining hand)
- *   air   → wall  when any hand grips a wall mid-fall
- *   air   → floor when ground is regained
- *   wall  → floor is not a direct transition: releasing both hands drops to `air`, and
- *                 `air` immediately re-grounds if the floor was never really lost.
- *
- * Floor contact (hand touching the ground or ceiling) never promotes to `wall` — it drives
- * push-off motion in `emitMotion` instead, exactly like a wall grip does while climbing.
- */
-function advanceStateMachine(): void {
-  const leftWall = runtime.leftHand.isGripping && runtime.leftHand.onWall
-  const rightWall = runtime.rightHand.isGripping && runtime.rightHand.onWall
-  const bothWall = leftWall && rightWall
-  const eitherWall = leftWall || rightWall
-  const sameSurface =
-    bothWall && runtime.leftHand.gripCollider === runtime.rightHand.gripCollider
-  const grounded = playerState.grounded
-
-  switch (runtime.state) {
-    case 'floor':
-      if (sameSurface) {
-        runtime.state = 'wall'
-      } else if (!grounded) {
-        runtime.state = 'air'
-      }
-      break
-    case 'wall':
-      if (!eitherWall) {
-        runtime.state = 'air'
-        runtime.bodyPositionOverride = null
-        runtime.wallNormal = null
-      }
-      break
-    case 'air':
-      if (grounded) {
-        runtime.state = 'floor'
-      } else if (eitherWall) {
-        runtime.state = 'wall'
-      }
-      break
-  }
-}
-
-/**
- * Produce `motion` (for `floor`) and `bodyPositionOverride` (for `wall`). Air produces
- * nothing: gravity is the rig's job, and the rig already runs it.
- */
-function emitMotion(moveSpeed: number): void {
-  runtime.motion = { x: 0, y: 0, z: 0 }
-  runtime.bodyPositionOverride = null
-  runtime.wallNormal = null
-
-  if (runtime.state === 'wall') {
-    runtime.wallNormal = bodyWallNormal()
-    runtime.bodyPositionOverride = bodyOverrideFromHands()
-    return
-  }
-
-  if (runtime.state === 'floor') {
-    // Arm-swinging on the floor is pure hand-contact, no button — a hand touching the
-    // ground or ceiling (`isGripping`, regardless of `onWall`) while it moves pushes the
-    // body the other way, same as real Gorilla Tag locomotion. A hand touching a wall
-    // contributes too: the state machine only promotes to `wall` once *both* hands are on
-    // the same wall-side collider, so a single hand brushing a wall while the other still
-    // pushes off the floor should keep walking, not do nothing.
-    const either = runtime.leftHand.isGripping || runtime.rightHand.isGripping
-    if (either) {
-      // Both hands always contribute when they're touching something — even if one of them
-      // just started this frame. `gorillaHandContribution` returns zero for an uninitialised
-      // hand (current === previous), so a hand that just started touching contributes
-      // nothing on the first frame, by construction.
-      const left = gorillaHandContribution(
-        runtime.leftHand.previousPosition,
-        runtime.leftHand.currentPosition,
-        runtime.leftHand.isGripping,
-        TRANSFER_FACTOR,
-      )
-      const right = gorillaHandContribution(
-        runtime.rightHand.previousPosition,
-        runtime.rightHand.currentPosition,
-        runtime.rightHand.isGripping,
-        TRANSFER_FACTOR,
-      )
-      // Convert per-step displacement to m/s so the rig can multiply by its own dt and
-      // stay consistent with the joystick fallback and the smooth-mode path. Hand motion
-      // and joystick motion now agree about what "the body is moving at 3 m/s" means.
-      runtime.motion.x = (left.x + right.x) / FIXED_STEP
-      runtime.motion.z = (left.z + right.z) / FIXED_STEP
-      return
-    }
+    movement.x += runtime.velocity.x * dt
+    movement.y += runtime.velocity.y * dt
+    movement.z += runtime.velocity.z * dt
 
     // Joystick fallback: a player whose arms are at rest still walks with the stick. Same
     // speed, same deadzone, same head-relative direction as smooth mode — by reusing
-    // `moveDirection`, not by re-deriving it.
-    const stick = applyDeadzone(
-      xrInput.left.thumbstick.x,
-      xrInput.left.thumbstick.y,
-      STICK_DEADZONE,
-    )
+    // `moveDirection`, not by re-deriving it. Only while no hand is on a surface, so it can
+    // never fight the hands for control of the body.
+    const stick = applyDeadzone(xrInput.left.thumbstick.x, xrInput.left.thumbstick.y, STICK_DEADZONE)
     const dir = moveDirection(stick, playerState.yaw)
-    runtime.motion.x = dir.x * moveSpeed
-    runtime.motion.z = dir.y * moveSpeed
-    return
+    movement.x += dir.x * moveSpeed * dt
+    movement.z += dir.y * moveSpeed * dt
   }
 
-  // `air`: motion stays at zero. Gravity owns vertical; horizontal motion during a fall
-  // is nothing, not reduced stick input.
-}
+  // --- Second pass: re-anchor each hand.
+  //
+  // The hands are children of the rig, so in the reference they have already been carried
+  // along by the movement applied a few lines above. Our rig moves later in the step and
+  // three.js won't rebuild the matrices until the next render, so the movement is added here
+  // by hand. Skipping this is what would make the body accelerate away: the anchor would be
+  // short by exactly the distance just travelled, every single step.
+  const leftAfter = left ? add(left, movement) : null
+  const rightAfter = right ? add(right, movement) : null
+  const bothEngaged = leftEngaged && rightEngaged
 
-/**
- * The wall normal driving the body offset. With two hands, the average of the two grip
- * normals (renormalised) — they almost always agree, but a corner where they don't should
- * not blow up. With one hand, that hand's normal unchanged.
- */
-function bodyWallNormal(): Vec3 {
-  const leftWall = runtime.leftHand.isGripping && runtime.leftHand.onWall
-  const rightWall = runtime.rightHand.isGripping && runtime.rightHand.onWall
-  if (!(leftWall && rightWall)) {
-    const hand = leftWall ? runtime.leftHand : runtime.rightHand
-    return hand.gripNormal
-  }
-  const n: Vec3 = {
-    x: (runtime.leftHand.gripNormal.x + runtime.rightHand.gripNormal.x) / 2,
-    y: (runtime.leftHand.gripNormal.y + runtime.rightHand.gripNormal.y) / 2,
-    z: (runtime.leftHand.gripNormal.z + runtime.rightHand.gripNormal.z) / 2,
-  }
-  const length = Math.hypot(n.x, n.y, n.z)
-  if (length === 0) return n
-  return { x: n.x / length, y: n.y / length, z: n.z / length }
-}
-
-/**
- * Where the body sits this step. Two-handed climbing uses the midpoint solve; one-handed
- * hanging uses the gripping hand's position plus the body offset along the grip normal —
- * a slight asymmetry from a clean midpoint, but the only honest answer when one hand is
- * the only thing keeping the player aloft.
- */
-function bodyOverrideFromHands(): Vec3 {
-  const leftWall = runtime.leftHand.isGripping && runtime.leftHand.onWall
-  const rightWall = runtime.rightHand.isGripping && runtime.rightHand.onWall
-  const both = leftWall && rightWall
-  const n = bodyWallNormal()
-  if (!both) {
-    const hand = leftWall ? runtime.leftHand : runtime.rightHand
-    return {
-      x: hand.currentPosition.x + n.x * BODY_OFFSET,
-      y: hand.currentPosition.y + n.y * BODY_OFFSET,
-      z: hand.currentPosition.z + n.z * BODY_OFFSET,
+  if (leftAfter) {
+    const contact = sweepHand(world, runtime.leftHand.anchor, sub(leftAfter, runtime.leftHand.anchor), !bothEngaged, scratch)
+    if (contact) {
+      runtime.leftHand.anchor = contact.position
+      leftTouching = true
+    } else {
+      runtime.leftHand.anchor = leftAfter
     }
   }
-  return gorillaBodyFromHands(
-    runtime.leftHand.currentPosition,
-    runtime.rightHand.currentPosition,
-    n,
-    BODY_OFFSET,
+  if (rightAfter) {
+    const contact = sweepHand(world, runtime.rightHand.anchor, sub(rightAfter, runtime.rightHand.anchor), !bothEngaged, scratch)
+    if (contact) {
+      runtime.rightHand.anchor = contact.position
+      rightTouching = true
+    } else {
+      runtime.rightHand.anchor = rightAfter
+    }
+  }
+
+  // --- Momentum to release on let-go.
+  storeVelocity(movement, dt)
+  if (leftTouching || rightTouching) {
+    const avg = averageVelocity()
+    const speed = Math.hypot(avg.x, avg.y, avg.z)
+    if (speed > VELOCITY_LIMIT) {
+      const scale = speed * JUMP_MULTIPLIER > MAX_JUMP_SPEED ? MAX_JUMP_SPEED / speed : JUMP_MULTIPLIER
+      runtime.velocity.x = avg.x * scale
+      runtime.velocity.y = avg.y * scale
+      runtime.velocity.z = avg.z * scale
+    }
+  }
+
+  // --- Unstick a hand that has been dragged too far from its anchor with clear air between
+  // it and the head. A hand still behind geometry is genuinely holding on; one out in the
+  // open has been left behind and must let go or the body is tethered to it forever.
+  const headAfter = add(scratch.head, movement)
+  if (leftTouching && leftAfter && shouldUnstick(world, headAfter, leftAfter, runtime.leftHand.anchor, scratch)) {
+    runtime.leftHand.anchor = leftAfter
+    leftTouching = false
+  }
+  if (rightTouching && rightAfter && shouldUnstick(world, headAfter, rightAfter, runtime.rightHand.anchor, scratch)) {
+    runtime.rightHand.anchor = rightAfter
+    rightTouching = false
+  }
+
+  runtime.leftHand.wasTouching = leftTouching
+  runtime.rightHand.wasTouching = rightTouching
+  runtime.touching = leftTouching || rightTouching
+  runtime.displacement = movement
+}
+
+const ZERO: Vec3 = { x: 0, y: 0, z: 0 }
+
+/**
+ * This step's hand position, clamped to arm's reach, or `null` when the hand isn't tracked.
+ *
+ * The first time a hand is seen its anchor is seeded to that same point, so the first step
+ * contributes a zero offset. Without the guard a freshly-visible hand at world point P would
+ * pull the body by `-(P - {0,0,0})`, which is a long way to be flung by "I just appeared".
+ */
+function handPositions(handedness: 'left' | 'right', scratch: GorillaScratch): Vec3 | null {
+  const hand = handedness === 'left' ? runtime.leftHand : runtime.rightHand
+  const obj = handedness === 'left' ? xrHands.left : xrHands.right
+  if (!obj) {
+    hand.initialised = false
+    hand.wasTouching = false
+    return null
+  }
+
+  obj.getWorldPosition(scratch.handPosition)
+  const raw: Vec3 = {
+    x: scratch.handPosition.x,
+    y: scratch.handPosition.y,
+    z: scratch.handPosition.z,
+  }
+  const clamped = clampArmReach(raw, scratch.head, MAX_ARM_LENGTH)
+
+  if (!hand.initialised) {
+    hand.anchor = clamped
+    hand.wasTouching = false
+    hand.initialised = true
+  }
+  return clamped
+}
+
+/** The path a hand wants to sweep this step, plus the reference's downward nudge. */
+function travel(anchor: Vec3, current: Vec3, downward: number): Vec3 {
+  return {
+    x: current.x - anchor.x,
+    y: current.y - anchor.y - downward,
+    z: current.z - anchor.z,
+  }
+}
+
+function add(a: Vec3, b: Vec3): Vec3 {
+  return { x: a.x + b.x, y: a.y + b.y, z: a.z + b.z }
+}
+
+function sub(a: Vec3, b: Vec3): Vec3 {
+  return { x: a.x - b.x, y: a.y - b.y, z: a.z - b.z }
+}
+
+/**
+ * Sweep the hand sphere from `from` along `movement`, then let it slide a little along
+ * whatever it hit. The reference's `IterativeCollisionSphereCast`.
+ *
+ * The slide is the second half of the behaviour, not a refinement: a contact that sticks
+ * perfectly means the instant both hands are down on a wall the body is welded in place, and
+ * pushing along a surface does nothing. Sliding a few per cent of the residual motion along
+ * the contact plane is what turns that weld into a grip you can shift.
+ */
+function sweepHand(
+  world: World,
+  from: Vec3,
+  movement: Vec3,
+  singleHand: boolean,
+  scratch: GorillaScratch,
+): Contact | null {
+  const first = sphereCast(world, from, movement, scratch, scratch.ball)
+  if (!first) {
+    // The reference's sanity-check cast: "this accounts for times when the original
+    // spherecast was already touching a surface so it didn't trigger correctly". A smaller
+    // sphere swept slightly further reaches a surface the full-size sweep was already
+    // resting flush against.
+    //
+    // It only rescues movement with a component *into* the surface. A sweep exactly parallel
+    // to a wall, at exactly the resting gap, still misses — extending a tangential sweep
+    // never brings it any closer. That case does not arise from a real hand, which presses
+    // into what it is holding and is never perfectly parallel two steps running, but it is
+    // worth knowing the limit is there rather than assuming this covers everything.
+    const reach = Math.hypot(movement.x, movement.y, movement.z)
+    if (reach === 0) return null
+    const extended = reach + HAND_RADIUS * PRECISION * 0.34
+    const grazing = sphereCast(
+      world,
+      from,
+      {
+        x: (movement.x / reach) * extended,
+        y: (movement.y / reach) * extended,
+        z: (movement.z / reach) * extended,
+      },
+      scratch,
+      scratch.smallBall,
+    )
+    // The hand stays exactly where it was: it never actually travelled, it was already
+    // touching. Returning the swept position instead would push it into the surface.
+    if (grazing) return { position: from, contactAxis: grazing.contactAxis, collider: grazing.collider }
+    return null
+  }
+
+  const slip = singleHand ? SLIDE_FACTOR_ONE_HANDED : SLIDE_FACTOR_TWO_HANDED
+  // The part of the requested motion the surface refused, projected onto the contact plane
+  // so the slide runs along the wall rather than into it.
+  const residual = sub(add(from, movement), first.position)
+  const along = projectOnPlane(residual, first.contactAxis)
+  const slide = { x: along.x * slip, y: along.y * slip, z: along.z * slip }
+
+  const second = sphereCast(world, first.position, slide, scratch, scratch.ball)
+  if (second) return second
+
+  // Nothing in the way of the slide: creep back towards the point the hand actually asked
+  // for, to undo the push-off-the-surface the first sweep's radius introduced.
+  const slid = add(first.position, slide)
+  const third = sphereCast(world, slid, sub(add(from, movement), slid), scratch, scratch.ball)
+  if (third) return third
+
+  return { position: slid, contactAxis: first.contactAxis, collider: first.collider }
+}
+
+/**
+ * One sphere sweep against grippable geometry.
+ *
+ * `stopAtPenetration` is on so a sphere that starts already inside a surface reports a
+ * time-of-impact of zero and stays put, rather than reporting nothing and letting the hand
+ * fall through. The resting position is the swept centre at impact, which is already a
+ * radius clear of the surface — no need to reconstruct it from the contact point.
+ */
+function sphereCast(
+  world: World,
+  from: Vec3,
+  movement: Vec3,
+  scratch: GorillaScratch,
+  ball: Ball,
+): Contact | null {
+  const distance = Math.hypot(movement.x, movement.y, movement.z)
+  if (distance === 0) return null
+
+  const hit = world.castShape(
+    from,
+    scratch.identity,
+    movement,
+    ball,
+    0,
+    1,
+    true,
+    QueryFilterFlags.EXCLUDE_SENSORS,
+    undefined,
+    playerCollider.current ?? undefined,
+    undefined,
+    isGrippable,
   )
+  if (!hit) return null
+
+  const toi = hit.time_of_impact
+  return {
+    position: {
+      x: from.x + movement.x * toi,
+      y: from.y + movement.y * toi,
+      z: from.z + movement.z * toi,
+    },
+    // A degenerate axis — a sweep starting in deep penetration reports one — would send the
+    // slide off in an arbitrary direction. Falling back to the movement axis means the slide
+    // projects to nothing, which is the safe answer.
+    contactAxis: normalise(hit.normal2) ?? normalise(movement) ?? UP,
+    collider: hit.collider,
+  }
+}
+
+const UP: Vec3 = { x: 0, y: 1, z: 0 }
+
+/**
+ * Which colliders the hands can hold onto. The reference's `locomotionEnabledLayers`.
+ *
+ * A predicate rather than a check on the hit, so non-grippable geometry — props, enemies,
+ * triggers — doesn't stop the sweep short of the wall behind it. The flag lives on the
+ * parent rigid body, not the collider; see Dungeon.tsx.
+ */
+function isGrippable(collider: Collider): boolean {
+  const userData = collider.parent()?.userData as { grippable?: boolean } | undefined
+  return userData?.grippable === true
+}
+
+/**
+ * Whether a stuck hand should let go: it has strayed further than `UNSTICK_DISTANCE` from
+ * its anchor, and there is nothing solid between the head and the hand to justify the hold.
+ */
+function shouldUnstick(
+  world: World,
+  head: Vec3,
+  hand: Vec3,
+  anchor: Vec3,
+  scratch: GorillaScratch,
+): boolean {
+  const strayed = Math.hypot(hand.x - anchor.x, hand.y - anchor.y, hand.z - anchor.z)
+  if (strayed <= UNSTICK_DISTANCE) return false
+  const toHand = sub(hand, head)
+  const reach = Math.hypot(toHand.x, toHand.y, toHand.z)
+  if (reach <= HAND_RADIUS) return true
+  // Shortened by the sphere radius so the wall the hand is legitimately pressed against
+  // doesn't itself count as "something in the way".
+  const scale = (reach - HAND_RADIUS) / reach
+  const blocked = sphereCast(
+    world,
+    head,
+    { x: toHand.x * scale, y: toHand.y * scale, z: toHand.z * scale },
+    scratch,
+    scratch.ball,
+  )
+  return blocked == null
+}
+
+function projectOnPlane(v: Vec3, normal: Vec3): Vec3 {
+  const d = v.x * normal.x + v.y * normal.y + v.z * normal.z
+  return {
+    x: v.x - normal.x * d,
+    y: v.y - normal.y * d,
+    z: v.z - normal.z * d,
+  }
+}
+
+function normalise(v: Vec3): Vec3 | null {
+  const length = Math.hypot(v.x, v.y, v.z)
+  if (length < 1e-6) return null
+  return { x: v.x / length, y: v.y / length, z: v.z / length }
+}
+
+/** Ring buffer of body velocity, so a release throws you at the speed you were moving at
+ *  rather than at whatever the final step happened to measure. */
+function storeVelocity(movement: Vec3, dt: number): void {
+  runtime.velocityIndex = (runtime.velocityIndex + 1) % VELOCITY_HISTORY_SIZE
+  const slot = runtime.velocityHistory[runtime.velocityIndex]
+  if (!slot) return
+  slot.x = movement.x / dt
+  slot.y = movement.y / dt
+  slot.z = movement.z / dt
+}
+
+function averageVelocity(): Vec3 {
+  let x = 0
+  let y = 0
+  let z = 0
+  for (const v of runtime.velocityHistory) {
+    x += v.x
+    y += v.y
+    z += v.z
+  }
+  const n = VELOCITY_HISTORY_SIZE
+  return { x: x / n, y: y / n, z: z / n }
 }
