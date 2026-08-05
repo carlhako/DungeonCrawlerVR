@@ -8,6 +8,7 @@ import {
   type LocomotionMode,
   type TurnMode,
 } from '@/systems/settings'
+import { useFrameHud } from '@/systems/frameStats'
 
 /**
  * Development instrumentation: the frame HUD and the live tuning panel.
@@ -144,6 +145,36 @@ export function MovementControls() {
     // As with the XR panel: leva owns the widget state once mounted, and rebuilding it on
     // every change would fight the slider mid-drag.
     [set],
+  )
+
+  return null
+}
+
+/**
+ * The in-headset frame readout (Sprint 3.0).
+ *
+ * The F2 panel is the *only* control for this, and deliberately so: it is dev
+ * instrumentation, not a comfort option, so it has no business on the 1.4 settings board
+ * competing for space with the settings that decide whether somebody can play at all. The
+ * toggle gates the display only — tracking runs from the first frame in dev, so the chart has
+ * five seconds of history the instant it is summoned.
+ */
+export function FrameControls() {
+  const setShow = useFrameHud((state) => state.setShowFpsReadout)
+  const showFpsReadout = useFrameHud((state) => state.showFpsReadout)
+
+  useControls(
+    'Frame',
+    () => ({
+      showFpsReadout: {
+        value: showFpsReadout,
+        label: 'fps readout (in VR)',
+        onChange: (value: boolean) => setShow(value),
+      },
+    }),
+    { collapsed: true },
+    // As with the other sections: leva owns the widget once mounted.
+    [setShow],
   )
 
   return null

@@ -33,9 +33,13 @@ import { ExploredMap } from '@/ui/ExploredMap'
 import { ExploredDriver } from '@/systems/ExploredDriver'
 import { DesktopInputSampler } from '@/systems/DesktopInputSampler'
 import { XRInputSampler, XRRenderSettings } from '@/systems/XRInputSampler'
+import { FrameStatsDriver } from '@/systems/FrameStatsDriver'
+import { FpsReadout } from '@/ui/FpsReadout'
+import { FrameChart } from '@/ui/FrameChart'
 import {
   DevPanel,
   DevPerf,
+  FrameControls,
   MovementControls,
   XRSettingsControls,
   useDevToggles,
@@ -195,6 +199,16 @@ export function App() {
               <EnemyCounter />
               <ExploredMap />
               <ExploredDriver />
+              {/* Sprint 3.0's frame readout. Dev-only, and kept out of the model lab on
+                  purpose: the lab measures luminance by reading the framebuffer back, and a
+                  HUD quad drawn over it would be measured along with the specimens. */}
+              {import.meta.env.DEV && (
+                <>
+                  <FrameStatsDriver />
+                  <FpsReadout />
+                  <FrameChart />
+                </>
+              )}
             </>
           )}
           <DevPerf visible={showPerf} />
@@ -208,6 +222,7 @@ export function App() {
         <>
           <XRSettingsControls />
           <MovementControls />
+          <FrameControls />
         </>
       )}
       <DesktopHint />

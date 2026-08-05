@@ -41,6 +41,7 @@ export function HudOverlay({
   renderOrder,
   draw,
   requireSideButton,
+  desktopHold,
 }: {
   sizeMetres: [number, number]
   canvasSize: HudCanvasSize
@@ -54,6 +55,16 @@ export function HudOverlay({
    * controller to hold: the overlay just stays on, same as before this existed.
    */
   requireSideButton?: boolean
+  /**
+   * The same gate for the desktop, where there is no controller to hold.
+   *
+   * Omitted, an overlay simply stays on outside a session — which is what the 2.5 counter and
+   * minimap want, since a monitor has room for them. An overlay that costs real work to draw
+   * should pass one: `draw` runs and re-uploads the texture on **every** frame the quad is
+   * visible, and a full-canvas upload per frame is a measurable cost under software rendering
+   * (it was enough to make the headless smoke test's timings drift into failure).
+   */
+  desktopHold?: () => boolean
 }) {
   const gl = useThree((state) => state.gl)
   const camera = useThree((state) => state.camera)
@@ -108,7 +119,9 @@ export function HudOverlay({
     if (!dome) return
 
     const isPresenting = gl.xr.isPresenting
-    dome.visible = !requireSideButton || !isPresenting || sideButtonHeld()
+    dome.visible = isPresenting
+      ? !requireSideButton || sideButtonHeld()
+      : !desktopHold || desktopHold()
     if (!dome.visible) return
 
     const head = isPresenting ? gl.xr.getCamera() : camera

@@ -18,6 +18,7 @@ import { enemyModelSnapshot, getEnemyModel } from '@/systems/enemies/models'
 import { wallTextureSnapshot } from '@/systems/environment/textures'
 import { fxSnapshot } from '@/systems/fx/state'
 import { playerVitals } from '@/systems/vitals'
+import { frameStats, frameSummary, useFrameHud, type FrameSummary } from '@/systems/frameStats'
 import { LAB_BACKGROUND_RGB, labGridLayout } from '@/scenes/ModelLab'
 import type { Material, MeshStandardMaterial } from 'three'
 
@@ -227,6 +228,16 @@ export interface DebugHandle {
      */
     cellRects(): Array<{ id: string; variant: string; x: number; y: number; w: number; h: number }> | null
   }
+  /**
+   * What the in-headset frame readout is reading.
+   *
+   * The display itself is a canvas quad welded to the head, which no headless screenshot can
+   * usefully judge — but "is anything being measured at all" is a real failure mode with no
+   * other symptom: a driver that never got mounted leaves a readout showing a confident,
+   * permanent 0. `showFpsReadout` is here too so the smoke test asserts against the same
+   * toggle the F2 panel writes to, rather than assuming the default.
+   */
+  readonly frame: FrameSummary & { showFpsReadout: boolean }
   /**
    * Kill everything currently standing, through the real damage path.
    *
@@ -506,6 +517,12 @@ export function installDebugHandle(): void {
       }
 
       return { ready, materials, luminance: computeLabLuminance, cellRects: labCellRects }
+    },
+    get frame() {
+      return {
+        ...frameSummary(frameStats),
+        showFpsReadout: useFrameHud.getState().showFpsReadout,
+      }
     },
     slay: () => {
       let killed = 0

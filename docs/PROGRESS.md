@@ -23,6 +23,14 @@ sprint, before committing. The roadmap itself lives in [PLAN.md](PLAN.md).
 > clip mapping and material contract all held up unchanged, and from across a dark room a
 > Skulker, a Warrior and a Wraith still read as different things.**
 >
+> **Epic 3 has started, and Sprint 3.0 — the in-headset frame readout — is signed off on the
+> Quest 3.** There is now a frame rate you can read *while wearing the headset*: an integer to
+> the right of your view, and a five-second frame-time chart with the 13.9ms budget drawn across
+> it behind a held face button. It exists because Sprint 3.1 cannot be signed off without it —
+> that sprint's acceptance test is "sustained 72fps, read from inside the headset", and the `F1`
+> HUD is DOM and does not composite into a VR session. **Sprint 3.1 — lighting — is next, and it
+> now has its instrument.**
+>
 > **There is something in the dungeon now.** Open the door, walk down the passage into the
 > generated level, and a wave composed from the wave number comes looking for you: Goblin
 > Skulkers that hit and back off, Skeleton Warriors that plant and telegraph a swing you can
@@ -66,7 +74,7 @@ sprint, before committing. The roadmap itself lives in [PLAN.md](PLAN.md).
 | | 2.5 HUD overlays: enemy counter & map | ✅ Verified on Quest 3 |
 | | 2.6 Hit feedback & VFX | ✅ Verified on Quest 3 |
 | | 2.7 Enemy models & textures | ✅ Verified on Quest 3 |
-| **3 — Look, Sound & Feel** | 3.0 In-headset frame readout | ⬜ |
+| **3 — Look, Sound & Feel** | 3.0 In-headset frame readout | ✅ Verified on Quest 3 |
 | | 3.1 Lighting | ⬜ |
 | | 3.2 Audio | ⬜ |
 | | 3.3 Foyer enhance | ⬜ |
@@ -1460,6 +1468,124 @@ Known scaffolding, and the gaps:
   they are the thing the player looks at hardest and the only thing that moves. Everything built
   here — the loader, the cache, the material injection — is enemy-shaped for now; generalising it
   is a decision for whoever decides the walls need a kit too.
+
+### ✅ Sprint 3.0 — In-headset frame readout
+
+The first sprint of Epic 3, and a prerequisite for the rest of it: Sprint 3.1's acceptance test
+is "sustained 72fps, **read from inside the headset**", and until now there was no way to read
+anything from inside the headset. `r3f-perf` (the `F1` HUD) is a DOM overlay and does not
+composite into an immersive session — Sprint 2.1's headset checklist already had to be
+corrected for telling Carl to look at a HUD that isn't there.
+
+**Verified on desktop:** typecheck clean · 779/779 unit tests (13 new) · production build
+succeeds · headless capture shows the readout drawn and the chart appearing only while the key
+is held, with no console errors.
+
+**Verified on the Quest 3 (2026-08-05).** The whole checklist below passed, after the readout
+itself was lowered twice — see the first decision. Notably: the number reads as **stable enough
+to glance at**, so `1 / last frame` stays as the plan specifies and the fallback to showing the
+1s average is not needed; and summoning the chart does not visibly cost frames.
+
+Delivered:
+
+- `src/systems/frameStats.ts` — the measurement, as pure data: a ring buffer of frame
+  durations with their stamps, the instantaneous rate, a windowed average and minimum, and the
+  1% low. Free of three.js and React. 13 tests.
+- `src/systems/FrameStatsDriver.tsx` — a `useFrame` peer that feeds it.
+- `src/ui/FpsReadout.tsx` — the integer, head-locked at the top right, coloured by verdict.
+- `src/ui/FrameChart.tsx` — the hold-to-show chart: a 5s trace of frame *times*, the 13.9ms
+  budget as a dashed line, over-budget segments in red, and the 1s avg / 1s min / 1% low under
+  it.
+- `src/ui/DevOverlay.tsx` — a `Frame` section in the F2 panel, which is the only control.
+- `src/core/debug.ts` — `__DCVR__.frame`, and a smoke-test check built on it.
+- `src/ui/HudOverlay.tsx` — an optional `desktopHold` gate, alongside the existing
+  `requireSideButton`.
+
+Decisions made during the sprint:
+
+- **The readout sits three fifths of the way up the view, and it took two moves to get
+  there.** As first written it was at 0.95, pressed right against `SAFE_FRACTION`'s limit — the
+  top edge of the Quest 3's vertical FOV, where reading it meant tilting the head rather than
+  glancing, which is no use for a number you are meant to watch *while* doing something else.
+  0.76 was still too high; 0.57 is where it landed. Two lessons, and the second is the one that
+  cost the extra round trip: **anything anchored near an edge has to be judged in VR** — the
+  same thing Sprint 2.5's two HUDs learned, which did not transfer — and a *comfortable glance*
+  is a far smaller cone than the FOV, so "it is on screen and not clipped" is nowhere near the
+  test. When something has to move for comfort, move it further than looks necessary from a
+  monitor.
+- **Tracking is a `useFrame` peer, not a `useFixedUpdate` system.** The fixed loop clamps its
+  input at `MAX_FRAME_DELTA` (0.25s) to avoid the spiral of death, so anything registered there
+  can never observe a frame worse than 4fps — which is precisely the dip this readout exists to
+  catch. It also runs at 60Hz regardless of the display, and what the display is doing *is* the
+  measurement.
+- **The chart plots frame times, not frame rates.** fps is a reciprocal, so a hitch is a shallow
+  dip on an fps plot and a spike on a time plot. The spike is what a headset feels.
+- **The y-axis is fixed at 33ms and does not auto-scale.** An axis that rescales to the worst
+  frame in view moves the 13.9ms target line, and the target line is the one thing on this chart
+  that has to sit still — the question is "is the trace under the line", which cannot be
+  answered at a glance if the line wanders. Anything worse than 33ms clamps to the top, which is
+  the correct summary of a frame that bad.
+- **The 1% low is the mean of the worst percentile, not a single percentile sample**, so one
+  unlucky frame does not define it. It is the number that separates "72fps average" from "72fps
+  average with a hitch every second", which are the same reading and completely different
+  experiences.
+- **An absent-frames gap is capped at one second rather than recorded verbatim.** A headset put
+  down on a desk, a backgrounded tab or a breakpoint hands the loop a delta measured in seconds;
+  recording it truthfully leaves the readout showing a fraction of one fps for five seconds
+  after the player picks the headset back up. Capped rather than dropped, because a genuine
+  multi-hundred-millisecond stall — a shader compile, a level load — is the single worst thing
+  this can catch and dropping it would hide it.
+- **The toggle is not persisted and is not on the settings board.** It is dev instrumentation,
+  not a comfort option, and the 1.4 board is where the settings that decide whether somebody can
+  play at all live. A frame counter someone left on three weeks ago is a draw call in front of
+  their face forever.
+- **The chart is a hold, on the desktop too — and that is a performance decision, not just
+  symmetry.** `HudOverlay` re-rasterises its canvas and re-uploads the texture on *every* frame
+  the quad is visible. Left permanently up on the desktop (which is what `requireSideButton`
+  alone means outside a session, the behaviour the 2.5 counter and minimap have), a
+  384×224 upload per frame was enough to slow SwiftShader past the point where the smoke test's
+  timed walks still arrived. Hence `desktopHold`, and `F4`.
+
+Found while verifying, and worth recording because it cost an hour:
+
+- **The smoke test fails on unmodified `main` once the real art assets are in
+  `public/`.** A baseline run of `HEAD` in a clean worktree passed — and proved nothing, because
+  `public/models` and `public/textures` are gitignored, so that worktree ran the primitive-bodied
+  game the pack replaced. Symlinking the assets in and re-running produced **the same 21
+  failures** as the working tree, line for line (shop purchases, the death sequence, the melee
+  swing), differing only in one dummy's health. They are timing failures on a software
+  rasteriser running the full skinned-mesh scene at ~8.5fps, not regressions. **A baseline in a
+  fresh worktree is not a baseline** unless the gitignored assets come with it.
+
+Known gaps, and the one deliberate omission:
+
+- **The readout shows `1 / last frame`, as the plan asks, and it holds up.** On SwiftShader that
+  swings between 60 and 200 between screenshots, which made it look like a bad idea from a
+  monitor; on a vsynced headset it is a steady 72 that drops to 36 on a dropped frame, and it
+  reads fine. Showing `avgFps` instead remains a one-line change if a future scene makes it
+  jitter — but that is a headset call, and guessing at it from a monitor is how the light ramp
+  in 2.1 cost three attempts.
+- **The chart's own cost did not show on-device**, which was the open question: it redraws a
+  384×224 canvas per frame while held, exactly the sort of thing that makes a frame counter
+  report the frame counter. Worth re-checking once 3.1's arena is heavier.
+- Out of scope by the plan and still out: settings-board integration, replacing `F1` entirely, a
+  wrist variant, persisting the toggle, an ms/fps toggle.
+
+**The Quest 3 checklist, all of it passed on 2026-08-05:**
+
+1. The fps figure sits to the **right of your view, a little above centre**, readable with a
+   glance rather than a head tilt, and it does not overlap the enemy counter when you summon
+   that. (It came down twice from the top edge to get here.)
+2. It **holds near 72** standing in the foyer, and stays there through a full wave in a
+   populated room. If it does not, that is Sprint 3.1's brief, and this is now the instrument
+   for it.
+3. It is **stable enough to read** — a number flickering through three values a second is not a
+   readout. Say so if it is; see the note above.
+4. **Hold a face button** — A/X or B/Y, either hand. The chart appears near the centre-bottom of
+   view and vanishes the instant you let go. The dashed 72fps line should sit well *above* the
+   trace, and the trace should go red only where it crosses.
+5. Watch the number while the chart is up: summoning it should not itself cost frames.
+6. Turn it off in the `F2` panel on the desktop, re-enter VR, and confirm nothing is drawn.
 
 ## How to pick this up in a new session
 

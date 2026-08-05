@@ -31,7 +31,7 @@ export function DesktopHint() {
   return (
     <div className="hint">
       Click to look around
-      {import.meta.env.DEV && <> · F1 perf · F2 tuning · F3 map</>}
+      {import.meta.env.DEV && <> · F1 perf · F2 tuning · F3 map · hold F4 frames</>}
     </div>
   )
 }

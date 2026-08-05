@@ -150,6 +150,11 @@ const info = await page.evaluate(async (sampleMs) => {
     litPixelRatio: sample.litPixelRatio,
     // The simulation must advance in wall-clock terms even when rendering is slow.
     simAdvanced: debug ? +(sample.simAfter - simTimeBefore).toFixed(3) : null,
+    // Sprint 3.0's frame readout, which is otherwise unverifiable outside a headset: the HUD
+    // itself is a canvas quad welded to the head. What can be checked here is that something
+    // is being measured at all — a driver that never mounted leaves the in-headset readout
+    // showing a confident, permanent 0, which looks exactly like a game that is not running.
+    frame: window.__DCVR__?.frame ?? null,
     sampleSeconds: +(sample.elapsed / 1000).toFixed(3),
   }
 }, SAMPLE_MS)
@@ -894,6 +899,36 @@ else if (Math.abs(info.simAdvanced - info.sampleSeconds) > 0.25) {
   failures.push(
     `simulation drifted from wall-clock: ${info.simAdvanced}s simulated in ${info.sampleSeconds}s`,
   )
+}
+/**
+ * Sprint 3.0: the frame readout is measuring something.
+ *
+ * Only the invariants — SwiftShader frames run at roughly half a second each, so the *values*
+ * here say nothing about the Quest 3, and the readout's feel is a headset call. What holds
+ * regardless of speed is that frames were recorded, that every derived rate is a positive
+ * number, and that the worst frame in the window can never be reported as better than the
+ * average of all of them.
+ */
+if (!info.frame) failures.push('no frame stats on the debug handle — did the driver mount?')
+else {
+  if (!(info.frame.frames > 0)) {
+    failures.push('the frame tracker recorded nothing over a two-second sample')
+  }
+  for (const [name, value] of Object.entries(info.frame)) {
+    if (name === 'showFpsReadout') continue
+    if (!(Number.isFinite(value) && value > 0)) {
+      failures.push(`frame stat ${name} is not a positive number: ${value}`)
+    }
+  }
+  if (info.frame.minFps > info.frame.avgFps + 1e-6) {
+    failures.push(
+      `the slowest frame beat the average: min ${info.frame.minFps}, avg ${info.frame.avgFps}`,
+    )
+  }
+  // Default-on in dev, which is what makes it visible on a headset running the dev server.
+  if (info.frame.showFpsReadout !== true) {
+    failures.push('the fps readout is off by default in a dev build')
+  }
 }
 if (!info.xr.entryRendered) failures.push('VR entry UI never rendered')
 // Headless Chromium exposes `navigator.xr` but has no device behind it, so

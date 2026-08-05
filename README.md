@@ -87,6 +87,11 @@ once per session, so it lands on your next VR entry. The board says so.
 - `F1` — frame/perf HUD
 - `F2` — live tuning panel (Movement, XR render, Lighting, Physics)
 - `F3` — top-down map of the current dungeon: rooms, torches, spawn points and where you are
+- `F4` (**hold**) — the frame-time chart, the desktop equivalent of holding a face button in VR
+
+The in-headset fps readout sits to the right of the view, a little above centre, and is on by
+default in dev; the `Frame` section of the `F2` panel turns it off. It is the one frame
+measurement that works inside a VR session — see "Frame rate", below.
 
 `F2` is a *dev* panel: DOM-only, stripped from production builds, and invisible inside a VR
 session. It stays because it tunes things a player has no business setting — physics,
@@ -213,8 +218,8 @@ Enter VR and confirm, in order:
     bracket, not a glow coming from nowhere. Check you can walk a long way in and back out
     without meeting an invisible wall. In the biggest room you can find, turn your head
     steadily and watch for judder: the world should track smoothly rather than stepping or
-    smearing behind you. There is no fps readout in the headset yet (the `F1` HUD is DOM, so
-    it does not composite into a VR session) — Sprint 3.1 owns that.
+    smearing behind you, and check the fps readout at the top right of your view while you do
+    (Sprint 3.0 — hold either face button for the frame-time chart behind it).
     Walking towards a dark torch, its light should grow the way an ember catches — quick at
     first, then settling in — not switch on and climb at a steady rate. Walking away, it
     should fade the same way in reverse; it should never fade partway and then cut out. If
@@ -351,6 +356,26 @@ decide whether the Quest holds 72fps. Set them from the F2 tuning panel on the d
 before entering VR — leva is DOM, so it is invisible once the headset takes over.
 Foveation applies live; framebuffer scale sizes the swapchain and so only takes effect on
 the next VR entry.
+
+### Frame rate
+
+The `F1` HUD is `r3f-perf`, which is DOM: it does not composite into an immersive session, so
+it can tell you nothing about the device the game actually ships on. The readout that can is
+Sprint 3.0's — a canvas quad welded to the head, drawn by the renderer like everything else in
+the world:
+
+- **Right of the view, a little above centre**, the current frame rate as an integer. Green at
+  66+, amber to 56, red below.
+- **Hold a face button** (A/X or B/Y, either hand — or `F4` on the desktop) for a five-second
+  frame-*time* chart, with the 13.9ms budget drawn across it as a dashed line and the trace in
+  red wherever it is over. Under it: the 1s average, the 1s minimum, and the 1% low. An average
+  of 72 with a hitch every second reads as broken in a headset, and only the last two can tell
+  those apart.
+
+Dev-only, and stripped from production builds. The measurement lives in
+`src/systems/frameStats.ts` and is fed from a `useFrame` peer rather than the fixed loop — the
+fixed loop clamps its input at 0.25s to avoid the spiral of death, so a system registered there
+can never see a frame worse than 4fps, which is exactly the dip this exists to catch.
 
 ## Architecture notes
 
