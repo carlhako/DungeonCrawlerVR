@@ -647,10 +647,24 @@ const UP: Vec3 = { x: 0, y: 1, z: 0 }
  * A predicate rather than a check on the hit, so non-grippable geometry — props, enemies,
  * triggers — doesn't stop the sweep short of the wall behind it. The flag lives on the
  * parent rigid body, not the collider; see Dungeon.tsx.
+ *
+ * **The static world is grippable by default.** This used to be strict opt-in, and the mode
+ * was completely dead everywhere outside the dungeon: the foyer's floor and walls are plain
+ * fixed bodies with no `userData`, so every sweep was filtered out and the player could
+ * stand with a hand flat on the ground and not move an inch. Opt-in is the wrong default for
+ * a rule that fails silently and totally — forgetting it in a new scene looks exactly like a
+ * broken physics port, which is a debugging session nobody should have to repeat.
+ *
+ * Only *fixed* bodies default to grippable. An anchor is a world-space point, so holding a
+ * body that moves would tether the player to a spot that body has already left. Anything
+ * that moves must opt in deliberately if it ever should be climbable.
  */
 function isGrippable(collider: Collider): boolean {
-  const userData = collider.parent()?.userData as { grippable?: boolean } | undefined
-  return userData?.grippable === true
+  const body = collider.parent()
+  if (body == null) return false
+  const userData = body.userData as { grippable?: boolean } | undefined
+  if (userData?.grippable != null) return userData.grippable
+  return body.isFixed()
 }
 
 /**

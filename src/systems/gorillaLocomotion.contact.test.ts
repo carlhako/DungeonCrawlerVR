@@ -182,3 +182,48 @@ describe('hand contact', () => {
     expect(Math.abs(moved.z)).toBeLessThan(1e-6)
   })
 })
+
+/**
+ * Which bodies count as handholds.
+ *
+ * These exist because the suite above passed in full while the game was unplayable. Every
+ * body in `buildWorld` carries an explicit `userData.grippable`, so the tests silently
+ * assumed the thing that was actually broken: the real foyer's floor and walls are plain
+ * fixed bodies with no `userData` at all, and the strict opt-in rule filtered every one of
+ * them out. A world built by hand is not evidence about a world built by a scene.
+ */
+describe('what counts as a handhold', () => {
+  /** A floor with no `userData` whatsoever — the foyer, and any scene that forgets. */
+  function floorOnly(kind: 'fixed' | 'kinematic'): RAPIER.World {
+    const w = new RAPIER.World({ x: 0, y: -22, z: 0 })
+    const desc =
+      kind === 'fixed' ? RAPIER.RigidBodyDesc.fixed() : RAPIER.RigidBodyDesc.kinematicPositionBased()
+    const body = w.createRigidBody(desc)
+    w.createCollider(
+      RAPIER.ColliderDesc.cuboid(20, 0.1, 20).setTranslation(0, FLOOR_Y - 0.1, 0),
+      body,
+    )
+    w.step()
+    return w
+  }
+
+  it('an untagged static floor is a handhold — the foyer regression', () => {
+    world = floorOnly('fixed')
+    placeHand('right', 0.3, 0.04, -0.35)
+    step()
+    placeHand('right', 0.3, 0.04, -0.05)
+
+    expect(step().z).toBeLessThan(-0.2)
+  })
+
+  it('an untagged moving body is not', () => {
+    // An anchor is a world-space point. Holding something that moves would tether the
+    // player to a position it has already left, so movement must opt in, never default in.
+    world = floorOnly('kinematic')
+    placeHand('right', 0.3, 0.04, -0.35)
+    step()
+    placeHand('right', 0.3, 0.04, -0.05)
+
+    expect(Math.abs(step().z)).toBeLessThan(1e-6)
+  })
+})
