@@ -66,13 +66,16 @@ sprint, before committing. The roadmap itself lives in [PLAN.md](PLAN.md).
 | | 2.5 HUD overlays: enemy counter & map | ✅ Verified on Quest 3 |
 | | 2.6 Hit feedback & VFX | ✅ Verified on Quest 3 |
 | | 2.7 Enemy models & textures | ✅ Verified on Quest 3 |
-| **3 — Fear & Atmosphere** | 3.1 Darkness & lighting | ⬜ |
-| | 3.2 Spatial audio | ⬜ |
-| | 3.3 Horror direction | ⬜ |
+| **3 — Look, Sound & Feel** | 3.0 In-headset frame readout | ⬜ |
+| | 3.1 Lighting | ⬜ |
+| | 3.2 Audio | ⬜ |
+| | 3.3 Foyer enhance | ⬜ |
+| | 3.4 Dungeon tweaking & gameplay music | ⬜ |
 | **4 — Depth & Polish** | 4.1 Full weapon roster | ⬜ |
 | | 4.2 Full enemy roster & bosses | ⬜ |
-| | 4.3 Third-person mode | ⬜ |
-| | 4.4 Ship it | ⬜ |
+| | 4.3 Loot (material drops) | ⬜ |
+| | 4.4 HUD redesign | ⬜ |
+| | 4.5 Ship it | ⬜ |
 
 ---
 
@@ -148,7 +151,7 @@ Decisions made during the sprint:
   a tracked one. This is the rule the whole torch-lit dungeon will need.
 - **The device emulator is opt-in** via `?xremulate`, not on by default — it injects a fake
   `navigator.xr` that would have the smoke test exercising a path no real player takes.
-- Known, deferred to Sprint 4.4: the emulator's synthetic environments (~4.6MB) land in
+- Known, deferred to the ship-it sprint: the emulator's synthetic environments (~4.6MB) land in
   `dist/` as dead chunks. They're dynamically imported and never fetched at runtime with
   `emulate: false`, so this is deploy size only, not load time.
 
@@ -195,8 +198,8 @@ Decisions made during the sprint:
 - **Smooth turning is the default**, at Carl's request, overriding the usual convention.
   Snap is the single most effective anti-nausea measure in VR, so it stays the first thing
   to reach for if anyone reports discomfort — but it is a preference, and the person playing
-  it gets to set it. Both modes are wired, validated and persisted, so the settings screen
-  in Sprint 4.4 is UI over an interface that already exists.
+  it gets to set it. Both modes are wired, validated and persisted, so the F2 dev panel
+  and the 1.4 settings board are UI over an interface that already exists.
 - **`migrate` is not optional on a versioned persist store.** Without one, zustand discards
   the whole stored blob on a version bump — so adding a movement setting silently reset the
   foveation and framebuffer scale tuned on-device in 0.2. The symptom is that the game just
@@ -208,7 +211,7 @@ Decisions made during the sprint:
   bump plus a `RESET_ON_MIGRATION` list naming the settings whose stored value to drop.
   **Every future default change needs the same treatment**, or it only applies to players
   with empty storage. The durable alternative — persisting only keys the player has actually
-  touched — is worth doing before the settings screen lands in 4.4.
+  touched — is worth doing before any future settings UI ships.
 - **Yaw lives on a group inside the rigid body**, not on the body. A capsule is rotationally
   symmetric, so pushing rotation through the physics pipeline buys nothing.
 - **The vignette is a dome, not a plane.** A plane close enough to fill the view has stereo

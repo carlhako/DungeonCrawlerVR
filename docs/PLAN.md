@@ -276,39 +276,104 @@ Every sprint ends with a **testable build**. Sprints from 0.2 onward are verifie
 
 ---
 
-### Epic 3 — Fear & Atmosphere
-*Goal: make it genuinely frightening in VR while holding 72fps.*
+### Epic 3 — Look, Sound & Feel
+*Goal: make the dungeon read, sound, and hit right — the look, the sound, and the feel of the game. The torch-lit dungeon stays a torch-lit dungeon; the foyer is the safe room; the combat is the point.*
 
-**Sprint 3.1 — Darkness & lighting**
-- Dark ambient baseline, animated torch flicker, exponential fog, optional player-held light.
+**Pre-Sprint 3.0 — In-headset frame readout**
+*Prerequisite for 3.1: the plan already calls out 3.1's own acceptance test as unrunnable without it.*
+
+- A pure `frameStats` system: ring buffer of render-frame deltas, current fps (1/last), 1s avg, 1s min, 1% low, and a 5s slice ready for a sparkline. Unit-tested. Tracking fed from a `useFrame` peer — the fixed loop's `MAX_FRAME_DELTA` clamp would hide exactly the dips this is for.
+- A head-locked HUD overlay at the top of view showing just the current fps as an integer (*e.g.* "73 fps"). On or off via a `showFpsReadout` setting in the store.
+- A popup chart on hold-side-button (the 2.5 pattern): a 5s sparkline of frame times with a target line at 13.9ms (72fps), and the 1s avg / 1s min / 1% low as supporting numbers. Redraws per frame inside the existing `HudOverlay` — the chart is real-time, not a snapshot.
+- `showFpsReadout` defaults to `import.meta.env.DEV` (on in dev, off in production). Tracking is always on in dev so the chart has data when you summon it; the setting only gates the display.
+- Exposed via the F2 dev panel as a placeholder, alongside the existing XR / Movement / Physics / Lighting sections. The F2 panel is the only path — the toggle is dev-only, with no production lift.
+- Dev-only. The plan's "must be dev-only" rule, applied uniformly.
+- **Out of scope:** settings board integration (the current 1.4 board is fine), replacing F1 r3f-perf entirely, a wrist variant, persisting the toggle across reloads, an "ms vs fps" toggle, fancy chart annotations.
+- ✅ **Test:** in the headset, the HUD shows the integer fps at the top of view; holding a face button on either controller brings up the chart; in a populated arena on the Quest 3 the readout holds near 72 over a wave. Unit tests cover the ring buffer and the stats invariants; headless frames are 0.6s and prove the *invariants*, not the experience.
+
+**Sprint 3.1 — Lighting**
 - **Light budget manager** (N nearest lights active, the rest emissive-only) — the key perf system. Sprint 2.1 laid the groundwork in `src/systems/lightPool.ts`: nearest-N with hysteresis, and a rate-limited hand-over so a light only ever moves while it is dark. This sprint sets N by profiling and takes over the emissive fallback.
 - Shadow strategy: one shadow-casting light maximum, tight cascades, everything else unshadowed.
-- **An in-headset frame readout.** `r3f-perf` is DOM and does not composite into an immersive session, so there is currently no way to see fps in VR — which makes this sprint's own acceptance test unrunnable. Needs a world-space readout (wrist or panel), and it must be dev-only.
-- ✅ **Test:** profile a fully populated arena on Quest 3 — sustained 72fps, read from inside the headset.
+- The torches on the walls are the player's light. (No dark ambient, no fog, no player-held light — the dungeon is what it is.)
+- ✅ **Test:** profile a fully populated arena on Quest 3 — sustained 72fps, read from inside the headset (the readout itself lands in Pre-Sprint 3.0).
 
-**Sprint 3.2 — Spatial audio**
+**Sprint 3.2 — Audio**
 - `AudioEngine`: HRTF-panned positional sources, distance/occlusion attenuation, pooled voices, a global mixer with per-bus volume in settings.
-- Ambience beds (dripping, distant chains, whispers), torch crackle, footsteps (yours and *theirs* — audible from behind), weapon and impact SFX, enemy vocalisations, low-HP heartbeat, and a **silence-before-spawn** stinger system.
+- Torch crackle, footsteps (yours and *theirs* — audible from behind), weapon and impact SFX, enemy vocalisations, low-HP heartbeat (combat feedback).
+- Music is split across 3.3 (foyer) and 3.4 (gameplay).
 - ✅ **Test:** in VR with headphones, close your eyes and point at an approaching unseen enemy — you should be able to.
 
-**Sprint 3.3 — Horror direction**
-- A budgeted scare director (paces scares; prevents both spam and dead air).
-- Set pieces: Wraiths phasing through walls, torches snuffing out as something passes, eyes glinting in unlit corridors, whisper events triggered behind the player.
-- VR-safe damage/death feedback: red vignette and audio ducking — never a full-screen black snap or forced camera motion.
-- ✅ **Test:** a full playtest through wave 8 in VR — scares land, nothing induces nausea.
+**Sprint 3.3 — Foyer enhance**
+- New wallpaper: the foyer is the safe room, and the walls should say so on their own.
+- **Wave complete signal**: a sound effect + a screen-space HUD overlay ("Wave Complete") that fires the moment the Wave Director clears the wave, so the player knows before they start walking home.
+- Background foyer music: a light, non-scary ambience that says "you are not in the dungeon anymore."
+- The walk home stays the walk home — the player walks back through the dungeon after the wave ends, both as the existing breath between run and shop, and to leave room for future loot collection.
+- ✅ **Test:** in VR, clear a wave and the sound + text fire together before the player turns around; the wallpaper reads as wallpaper at any reasonable distance; the foyer music plays in the foyer and only in the foyer.
+
+**Sprint 3.4 — Dungeon tweaking & gameplay music**
+- Dungeon geometry: a taller roof, slightly bigger and more open rooms, pillars in the larger rooms.
+- More room templates: the generator currently has one shape; variety is the point.
+- Skylights: vertical light shafts from above (visual + ambient).
+- Breakable walls: hidden passages, short-cuts, optional loot behind them.
+- Floor and roof textures: variation, not the uniform materials the primitives currently ship with.
+- Gameplay music: a dungeon bed, distinct from the foyer music, that supports the combat without trying to be horror.
+- ✅ **Test:** regenerate twenty seeds — every one is connected, every large room has pillars, every other room has visible variety in floor / roof / template, and the gameplay music plays in the dungeon and only in the dungeon.
 
 ---
 
 ### Epic 4 — Depth & Polish
 *Goal: enough content and finish to be a real game.*
 
-**Sprint 4.1 — Full weapon roster** — the remaining 8 weapons, upgrade trees, elemental status effects (burn, chill, shock, curse) and their interactions. Balance pass via the leva tuning panel.
+**Sprint 4.1 — Full weapon roster**
+- The remaining 8 weapons (Boneshard Staff, Stormcaller Rod, Voidcaller Orb, Arcane Crossbow, Grave Warden's Maul, Reaper's Scythe, Soulcatcher Lantern, Hex Grimoire), upgrade trees, elemental status effects (burn, chill, shock, curse) and their interactions. Balance pass via the leva tuning panel.
+- Soulcatcher Lantern stays as designed. Its "drain HP to reveal enemies through walls, light dims while draining" mechanic is a combat-coded risk/reward trade — the dungeon can have dark pockets (the Weeping Widow's torch-snuffing), they're just not the *theme* of the game.
+- Weapon-material requirements are the **4.3** deliverable, not this one — this sprint adds the weapons and their mechanics, the gating is in 4.3.
+- ✅ **Test:** buy and equip every weapon in the shop; verify each upgrade track levels up; verify the Soulcatcher Lantern's drain mechanic works as designed.
 
-**Sprint 4.2 — Full enemy roster & bosses** — remaining enemies, elite variants with affixes, **The Hollow King** (wave 10) with a multi-phase fight and boss audio, wave table extended to 20 with **The Weeping Widow**.
+**Sprint 4.2 — Full enemy roster & bosses**
+- Remaining enemies: Grave Hound, Skeleton Archer, Crypt Spider, Bloated Cadaver, Cultist Acolyte, plus elite variants with affixes.
+- **Four bosses, every 5th wave:**
+  - **The Bone Marshal** (wave 5) — Skeleton Warrior scaled up. Shield stance (frontal block) → shield bash (telegraphed, knockback) → 50% HP phase change (drops shield, gains double-overhead swing). Vulnerable from the back/flank. Drops Bone Fragments + Boss Soul. First boss, teaches the player what a boss is.
+  - **The Hollow King** (wave 10) — summons skeletons, ground-slam shockwaves, phase change at 50%.
+  - **The Wizard** (wave 15) — fireball (projectile), frost nova (AoE slow), summon skeletons. 50% HP phase (more fireballs, more summons). Vulnerable after the frost nova. Drops Wraith Essence + Boss Soul. First ranged boss — distinct from the two melee bosses before it.
+  - **The Weeping Widow** (wave 20) — ceiling-dwelling spider-wraith, snuffs torches as an attack.
+- **Wave Director refactor.** Every 5th wave gets a `boss: enemyId | null` field on the wave table. When non-null, the boss *is* the wave — no minions. The composition logic splits into "boss wave" and "regular wave" paths.
+- ✅ **Test:** regenerate forty seeds (10 waves × 4 bosses), each boss is present on its wave and absent elsewhere; hand-tune a regular wave to verify the non-boss path still composes correctly.
+- **Model assignment note.** The model library has no dedicated Spider or Hound model. The Crypt Spider and Grave Hound either use primitives (the 2.3-era approach) or pick the closest fit from the existing models. To be decided when 4.2 starts.
 
-**Sprint 4.3 — Third-person mode** — orbit camera with collision, player character model driven by the same animation set, aim reconciliation between camera and character, toggle bound to a key. Desktop only; VR always stays first-person.
+**Sprint 4.3 — Loot (material drops)**
+- Enemies drop *materials*, not equipment. No inventory — materials are account-bound, spent at the shop. Reasoning: equipment drops would mean a full inventory system; materials give the walk-home a reason to exist without one.
+- **Seven material types**, each dropped by specific enemies and required by specific weapons and upgrades:
 
-**Sprint 4.4 — Ship it** — main menu, settings screen (comfort, audio, graphics scale), VR-safe pause, wrist-mounted diegetic HUD (health on the left wrist, mana/charge on the weapon — **no screen-space HUD in VR**), a short tutorial, asset compression, production build and HTTPS deploy, full Quest 3 QA pass.
+  | Material | Dropped by | Used for |
+  |---|---|---|
+  | Bone Fragments | Skeleton Warrior, Skeleton Archer, Bone Marshal, Hollow King | Boneshard Staff, Soulcatcher Lantern |
+  | Hound Pelt | Grave Hound | Frostbrand Sword, Voidcaller Orb |
+  | Wraith Essence | Wraith, The Wizard | Stormcaller Rod, Soulcatcher Lantern |
+  | Spider Silk | Crypt Spider, Weeping Widow | Reaper's Scythe |
+  | Cadaver Ichor | Bloated Cadaver | Grave Warden's Maul, Hex Grimoire |
+  | Cultist Cloth | Cultist Acolyte | Arcane Crossbow, Hex Grimoire |
+  | Boss Soul | All four bosses | Ultimate-tier upgrades (one per weapon) |
+
+- **Shop board (1.3) gains a second requirement column.** Alongside the gold cost, a list of materials. A purchase is allowed when both gold *and* materials are sufficient. The existing 1.3 tests pin "not enough gold" — equivalent "not enough materials" cases follow the same pattern.
+- The walk-home protected since 3.4 is now the collecting beat — the player walks back through the dungeon to scoop up whatever they missed.
+- ✅ **Test:** kill a Skeleton Warrior, get Bone Fragments; buy a Boneshard Staff with sufficient gold + materials, succeed; buy with insufficient materials, refusal tells you why on the board.
+
+**Sprint 4.4 — HUD redesign**
+- Health on the left wrist (a diegetic panel, parented to the controller).
+- Mana on the weapon (a diegetic readout on the weapon model).
+- The other screen-space HUDs (enemy counter, explored map, frame readout) stay where they are — the "no screen-space HUD in VR" line was dropped with the pivot.
+- ✅ **Test:** in VR, the health readout tracks damage taken and the mana readout tracks mana spent; both visible only on the wrist / weapon, not anywhere on the screen.
+
+**Sprint 4.5 — Ship it**
+- The remainder of the old 4.4 after 4.4 was pulled out, settings screen was dropped, and VR-safe pause was dropped: main menu, short tutorial, asset compression, production build with HTTPS deploy, full Quest 3 QA pass.
+- Tests stay on device (the standing rule from the Cross-Cutting Practices): the Quest 3 QA pass is the trip — the headset is what the game ships on.
+
+**Dropped from the original 4.x plan:**
+- Third-person mode (desktop parity) — dropped.
+- Settings screen — the current F2 dev panel + 1.4 settings board is fine.
+- VR-safe pause — dropped.
+- "No screen-space HUD in VR" — the screen-space HUDs (enemy counter, map, FPS) stay where they are.
 
 ---
 
@@ -338,5 +403,4 @@ Every sprint ends with a **testable build**. Sprints from 0.2 onward are verifie
 
 ## Open Items
 
-- Music: whether to license a CC0 dark-ambient bed or generate tension layers procedurally — decide at Sprint 3.2.
 - Hand-tracking (controller-free) support is **out of scope**; controllers only. Revisit post-Epic 4.
